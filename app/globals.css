@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --color-olivo-50: #f4f7ee;
+  --color-olivo-100: #e6edd8;
+  --color-olivo-200: #cddbb3;
+  --color-olivo-300: #aec387;
+  --color-olivo-400: #8ea85f;
+  --color-olivo-500: #6f8c41;
+  --color-olivo-600: #567031;
+  --color-olivo-700: #435729;
+  --color-olivo-800: #374624;
+  --color-olivo-900: #2c3820;
+  --color-tierra-50: #fbf6ef;
+  --color-tierra-100: #f4e8d6;
+  --color-tierra-300: #dfb889;
+  --color-tierra-500: #c27c3e;
+  --color-tierra-600: #a8642c;
+  --color-tierra-700: #8a4f25;
+  --color-arena: #f6f3ea;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+html,
+body {
+  background: var(--color-arena);
+  color: #1f2617;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Campos grandes y legibles al sol */
+input,
+select,
+textarea {
+  font-size: 17px;
+}
+
+.pb-nav {
+  padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white;
+  }
+  .print-full {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+}
+
+.leaflet-container {
+  font: inherit;
+}

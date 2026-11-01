@@ -1,0 +1,14 @@
+{
+  "name": "Cultivix",
+  "short_name": "Cultivix",
+  "description": "Gestión agrícola sencilla con asistente inteligente",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f6f3ea",
+  "theme_color": "#374624",
+  "lang": "es",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
