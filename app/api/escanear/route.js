@@ -41,13 +41,51 @@ const HERRAMIENTA = {
   },
 };
 
+const HERRAMIENTA_COSECHA = {
+  name: "ticket_cosecha",
+  description: "Datos de un ticket o albarán de entrega de cosecha (almazara, cooperativa, comprador).",
+  input_schema: {
+    type: "object",
+    properties: {
+      destino_nombre: { type: "string", description: "Empresa que recibe la cosecha (almazara, cooperativa…)" },
+      fecha: { type: "string", description: "YYYY-MM-DD" },
+      numero_ticket: { type: "string" },
+      cultivo: { type: "string", description: "aceituna/olivar, pistacho, almendra…" },
+      calidad: { type: "string", description: "Vuelo, Suelo, Extra, Primera… tal como aparezca" },
+      kilos_brutos: { type: "number" },
+      kilos_netos: { type: "number", description: "Kilos netos liquidables" },
+      rendimiento_pct: { type: "number", description: "Rendimiento graso % (aceituna)" },
+      humedad_pct: { type: "number" },
+      impurezas_pct: { type: "number", description: "Tierra/hojas/impurezas %" },
+      acidez: { type: "number" },
+      notas: { type: "string" },
+    },
+    required: ["kilos_netos"],
+  },
+};
+
 export async function POST(req) {
   try {
     const { supabase, user } = await clienteDelUsuario(req);
-    const { empresa_id, base64, media_type } = await req.json();
+    const { empresa_id, base64, media_type, tipo } = await req.json();
     const rol = await rolEnEmpresa(supabase, user.id, empresa_id);
-    if (!["propietario", "administrador", "encargado"].includes(rol)) return Response.json({ error: "Solo el titular o encargado registra compras" }, { status: 403 });
     if (!base64) return Response.json({ error: "Falta la imagen" }, { status: 400 });
+
+    if (tipo === "cosecha") {
+      const r = await claude().messages.create({
+        model: MODELO,
+        max_tokens: 1500,
+        system: "Lees tickets de entrega de cosecha de agricultores españoles (básculas de almazaras, cooperativas, compradores). Extrae los datos con precisión. Si un dato no aparece, déjalo vacío. No inventes cifras.",
+        tools: [HERRAMIENTA_COSECHA],
+        tool_choice: { type: "tool", name: "ticket_cosecha" },
+        messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: media_type || "image/jpeg", data: base64 } }, { type: "text", text: "Extrae los datos de este ticket." }] }],
+      });
+      const out = entradaHerramienta(r) || {};
+      await supabase.from("acciones_ia").insert({ empresa_id, usuario_id: user.id, canal: "documento", entrada: "ticket cosecha", propuesta: out, estado: "propuesta", modelo: MODELO });
+      return Response.json(out);
+    }
+
+    if (!["propietario", "administrador", "encargado"].includes(rol)) return Response.json({ error: "Solo el titular o encargado registra compras" }, { status: 403 });
 
     const { data: productos } = await supabase.from("productos").select("id,nombre,tipo,unidad").eq("empresa_id", empresa_id);
     const { data: proveedores } = await supabase.from("proveedores").select("nombre,nif").eq("empresa_id", empresa_id);

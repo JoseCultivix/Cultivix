@@ -5,6 +5,7 @@ import { apiGet, supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import { Boton, Campo, Etiqueta, Fichas, Hoja, Input, Pagina, Select, Tarjeta, Vacio } from "@/components/ui";
 import { bbox, centro } from "@/lib/geo";
+import { asignarCultivo } from "@/lib/campanas";
 import { CULTIVO_POR_USO, USOS_SIGPAC, num } from "@/lib/formato";
 
 export default function PaginaParcelas() {
@@ -16,7 +17,7 @@ export default function PaginaParcelas() {
 }
 
 function Parcelas() {
-  const { empresaId, recintos, campana, cultivos, esGestor, recargar, notificar } = useApp();
+  const { empresaId, recintos, esGestor, recargar, notificar } = useApp();
   const q = useSearchParams();
   const [fincas, setFincas] = useState([]);
   const [parcelas, setParcelas] = useState([]);
@@ -166,7 +167,7 @@ function SelectorFinca({ fincas, fincaId, setFincaId, nueva, setNueva }) {
 }
 
 function ImportarSigpac({ fincas, parcelas, onHecho }) {
-  const { empresaId, campana, cultivos, actualizarGps, notificar, recintos: existentes } = useApp();
+  const { empresaId, campanas, cultivos, actualizarGps, notificar, recintos: existentes } = useApp();
   const [modo, setModo] = useState("gps");
   const [ref, setRef] = useState({ pr: "", mu: "", po: "", pa: "", ag: "0", zo: "0" });
   const [buscando, setBuscando] = useState(false);
@@ -279,9 +280,8 @@ function ImportarSigpac({ fincas, parcelas, onHecho }) {
           if (error) throw error;
           recId = data.id;
         }
-        if (cultivoDe[r.recinto] && campana) {
-          await supabase.from("recinto_cultivos").delete().eq("recinto_id", recId).eq("campana_id", campana.id);
-          await supabase.from("recinto_cultivos").insert({ empresa_id: empresaId, recinto_id: recId, cultivo_id: cultivoDe[r.recinto], campana_id: campana.id, superficie_ha: r.superficie });
+        if (cultivoDe[r.recinto]) {
+          await asignarCultivo({ empresaId, recintoId: recId, cultivoId: cultivoDe[r.recinto], superficie: r.superficie, campanasActivas: campanas.filter((c) => c.activa) });
         }
       }
       onHecho(`${elegidos.length - yaEstan.length} recinto(s) importados de SIGPAC ✓`);
@@ -359,7 +359,7 @@ function ImportarSigpac({ fincas, parcelas, onHecho }) {
 }
 
 function ParcelaManual({ fincas, onHecho }) {
-  const { empresaId, campana, cultivos, notificar } = useApp();
+  const { empresaId, cultivos, notificar } = useApp();
   const [nombre, setNombre] = useState("");
   const [ha, setHa] = useState("");
   const [cultivo, setCultivo] = useState(null);
@@ -376,7 +376,7 @@ function ParcelaManual({ fincas, onHecho }) {
       if (error) throw error;
       const { data: r, error: e2 } = await supabase.from("recintos").insert({ empresa_id: empresaId, parcela_id: p.id, superficie_sigpac_ha: sup, fuente: "manual" }).select("id").single();
       if (e2) throw e2;
-      if (cultivo && campana) await supabase.from("recinto_cultivos").insert({ empresa_id: empresaId, recinto_id: r.id, cultivo_id: cultivo, campana_id: campana.id, superficie_ha: sup });
+      if (cultivo) await asignarCultivo({ empresaId, recintoId: r.id, cultivoId: cultivo, superficie: sup });
       onHecho("Parcela añadida ✓");
     } catch (e) {
       notificar(e.message, "error");
@@ -406,7 +406,7 @@ function ParcelaManual({ fincas, onHecho }) {
 }
 
 function EditarParcela({ parcela, fincas, onHecho }) {
-  const { campana, cultivos, recintos, notificar, empresaId } = useApp();
+  const { campanas, cultivos, recintos, notificar, empresaId } = useApp();
   const mios = recintos.filter((r) => r.parcela_id === parcela.id);
   const [nombre, setNombre] = useState(parcela.nombre);
   const [fincaId, setFincaId] = useState(parcela.finca_id);
@@ -419,12 +419,15 @@ function EditarParcela({ parcela, fincas, onHecho }) {
       const fid = await obtenerFinca(empresaId, fincaId, nuevaFinca);
       const { error } = await supabase.from("parcelas").update({ nombre, finca_id: fid }).eq("id", parcela.id);
       if (error) throw error;
-      if (campana)
-        for (const r of mios) {
-          await supabase.from("recinto_cultivos").delete().eq("recinto_id", r.id).eq("campana_id", campana.id);
-          if (cult[r.id])
-            await supabase.from("recinto_cultivos").insert({ empresa_id: empresaId, recinto_id: r.id, campana_id: campana.id, cultivo_id: cult[r.id], variedad: variedad[r.id] || null, superficie_ha: r.superficie_sigpac_ha });
-        }
+      for (const r of mios)
+        await asignarCultivo({
+          empresaId,
+          recintoId: r.id,
+          cultivoId: cult[r.id] || null,
+          variedad: variedad[r.id] || null,
+          superficie: r.superficie_sigpac_ha,
+          campanasActivas: campanas.filter((c) => c.activa),
+        });
       onHecho("Parcela actualizada ✓");
     } catch (e) {
       notificar(e.message, "error");
@@ -442,7 +445,7 @@ function EditarParcela({ parcela, fincas, onHecho }) {
         <Input value={nombre} onChange={(e) => setNombre(e.target.value)} />
       </Campo>
       <SelectorFinca fincas={fincas} fincaId={fincaId} setFincaId={setFincaId} nueva={nuevaFinca} setNueva={setNuevaFinca} />
-      <p className="text-sm font-bold text-stone-700">Cultivo en {campana?.nombre || "la campaña"}</p>
+      <p className="text-sm font-bold text-stone-700">Cultivo actual de cada recinto</p>
       {mios.map((r) => (
         <Tarjeta key={r.id} className="!p-3">
           <p className="text-sm font-semibold">

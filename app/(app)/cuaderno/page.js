@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import { Boton, Cargando, Pagina, Vacio } from "@/components/ui";
+import SelectorCampana, { campanasSeleccionadas } from "@/components/SelectorCampana";
 import { fechaCorta, num } from "@/lib/formato";
 
 const COLS = [
@@ -22,20 +23,24 @@ const COLS = [
 ];
 
 export default function Cuaderno() {
-  const { empresaId, campana, empresa } = useApp();
+  const { empresaId, campanas, empresa } = useApp();
+  const [sel, setSel] = useState("activas");
   const [filas, setFilas] = useState(null);
+  const elegidas = useMemo(() => campanasSeleccionadas(campanas, sel), [campanas, sel]);
+  const ids = elegidas.map((c) => c.id).join(",");
+  const campana = { nombre: elegidas.map((c) => c.nombre).join(" + ") };
 
   useEffect(() => {
-    if (!campana) return setFilas([]);
+    if (!ids) return setFilas([]);
+    setFilas(null);
     supabase
       .from("v_cuaderno_campo")
       .select("*")
       .eq("empresa_id", empresaId)
-      .gte("fecha", campana.fecha_inicio)
-      .lte("fecha", campana.fecha_fin)
+      .in("campana_id", ids.split(","))
       .order("fecha")
       .then(({ data }) => setFilas(data || []));
-  }, [empresaId, campana]);
+  }, [empresaId, ids]);
 
   function csv() {
     const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -65,6 +70,7 @@ export default function Cuaderno() {
         )
       }
     >
+      <SelectorCampana valor={sel} onCambio={setSel} />
       <p className="no-print mb-4 text-[15px] text-stone-600">Se rellena solo con los tratamientos y abonados que registras. No tienes que escribir nada aquí.</p>
       {(pendientes > 0 || sinRegistro.length > 0) && (
         <div className="no-print mb-4 space-y-1 rounded-2xl bg-amber-100 p-3 text-sm text-amber-900">

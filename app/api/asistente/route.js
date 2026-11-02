@@ -98,7 +98,7 @@ export async function POST(req) {
       gestor
         ? supabase.from("albaranes_compra").select("fecha,total,proveedores(nombre),albaranes_compra_lineas(descripcion,cantidad,unidad,importe)").eq("empresa_id", empresa_id).gte("fecha", hace1a).order("fecha", { ascending: false }).limit(100)
         : Promise.resolve({ data: [] }),
-      supabase.from("campanas").select("nombre,fecha_inicio,fecha_fin").eq("empresa_id", empresa_id).eq("activa", true).maybeSingle(),
+      supabase.from("campanas").select("nombre,fecha_inicio,fecha_fin,cultivos(nombre)").eq("empresa_id", empresa_id).eq("activa", true),
     ]);
 
     const costes = {};
@@ -145,7 +145,8 @@ ${lista(tra.data || [], (t) => `${t.id} | ${t.nombre} ${t.apellidos || ""}${t.id
 === PRODUCTOS (id | nombre | tipo | unidad | dosis habitual/ha${gestor ? " | stock | €/ud" : ""}) ===
 ${lista(pro.data || [], (p) => `${p.id} | ${p.nombre} | ${p.tipo} | ${p.unidad} | ${p.dosis_habitual_ha ?? "-"}${gestor ? ` | ${st[p.id]?.stock ?? 0} | ${st[p.id]?.precio_medio ?? "-"}` : ""}`)}
 
-=== CAMPAÑA ACTIVA === ${camp.data ? `${camp.data.nombre} (${camp.data.fecha_inicio} a ${camp.data.fecha_fin})` : "-"}
+=== CAMPAÑAS EN CURSO (una por cultivo) ===
+${lista(camp.data || [], (c) => `${c.cultivos?.nombre || "General"}: ${c.nombre} (${c.fecha_inicio} a ${c.fecha_fin})`)}
 
 === PARTES ÚLTIMOS 12 MESES (fecha | labor | parcelas | horas | estado${gestor ? " | coste €" : ""} | productos) ===
 ${lista(partes.data || [], (p) => `${p.fecha} | ${nomLab[p.labor_id] || "-"} | ${(p.partes_trabajo_recintos || []).map((x) => nomRec[x.recinto_id]).join(", ")} | ${p.horas_totales ?? "-"} | ${p.estado}${gestor ? ` | ${costes[p.id] ?? "-"}` : ""} | ${(p.aplicaciones?.[0]?.aplicaciones_productos || []).map((x) => `${nomPro[x.producto_id]} ${x.dosis_ha ?? ""}/ha (${x.cantidad_total ?? "?"})`).join("; ")}`)}

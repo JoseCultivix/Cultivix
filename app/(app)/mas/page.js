@@ -10,6 +10,7 @@ export default function Mas() {
   const router = useRouter();
   const items = [
     ["/partes", "📋", esGestor ? "Partes de trabajo" : "Mis partes", true],
+    ["/cosechas", "🧺", "Cosechas", true],
     ["/parcelas", "🗺️", "Parcelas y SIGPAC", true],
     ["/maquinaria", "🚜", "Maquinaria y aperos", true],
     ["/productos", "🧴", "Productos y stock", true],

@@ -18,7 +18,6 @@ export default function Onboarding() {
   const [cultivos, setCultivos] = useState(["Olivar"]);
   const [maq, setMaq] = useState(["Tractor principal"]);
   const [aperos, setAperos] = useState([]);
-  const [campana, setCampana] = useState("natural");
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState(null);
 
@@ -35,8 +34,6 @@ export default function Onboarding() {
   async function crear() {
     setGuardando(true);
     setError(null);
-    const y = new Date().getFullYear();
-    const inicio = campana === "olivar" ? `${y}-10-01` : `${y}-01-01`;
     const { error } = await supabase.rpc("crear_empresa", {
       p_nombre: nombre,
       p_provincia: provincia || null,
@@ -44,7 +41,7 @@ export default function Onboarding() {
       p_cultivos: cultivos,
       p_maquinaria: maq,
       p_aperos: aperos,
-      p_inicio_campana: inicio,
+      p_inicio_campana: null,
     });
     if (error) {
       setError(error.message);
@@ -99,22 +96,14 @@ export default function Onboarding() {
       )}
       {paso === 3 && (
         <>
-          <h1 className="mt-1 text-3xl font-black text-olivo-900">¿Cómo cuentas tu campaña?</h1>
-          <p className="mt-2 text-stone-600">Todo el histórico se ordena por campañas.</p>
+          <h1 className="mt-1 text-3xl font-black text-olivo-900">Tus campañas</h1>
+          <p className="mt-2 text-stone-600">Cada cultivo tendrá su propia campaña. Te las preparo así y podrás cambiar las fechas cuando quieras en Ajustes:</p>
           <div className="mt-6 space-y-3">
-            {[
-              ["natural", "Año natural", "1 de enero – 31 de diciembre"],
-              ["olivar", "Campaña oleícola", "1 de octubre – 30 de septiembre"],
-            ].map(([k, t, d]) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setCampana(k)}
-                className={`w-full rounded-2xl border-2 p-4 text-left ${campana === k ? "border-olivo-700 bg-olivo-50" : "border-stone-200 bg-white"}`}
-              >
-                <p className="text-lg font-bold">{t}</p>
-                <p className="text-stone-600">{d}</p>
-              </button>
+            {cultivos.map((c) => (
+              <div key={c} className="rounded-2xl border-2 border-stone-200 bg-white p-4">
+                <p className="text-lg font-bold">{c}</p>
+                <p className="text-stone-600">{c === "Olivar" ? "Campaña oleícola: 1 de octubre – 30 de septiembre" : "Año natural: 1 de enero – 31 de diciembre"}</p>
+              </div>
             ))}
           </div>
           {error && <p className="mt-4 rounded-xl bg-red-100 p-3 text-red-800">{error}</p>}

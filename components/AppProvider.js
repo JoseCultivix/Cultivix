@@ -14,7 +14,7 @@ export default function AppProvider({ children }) {
   const [perfil, setPerfil] = useState(null);
   const [empresas, setEmpresas] = useState(null);
   const [empresaId, setEmpresaId] = useState(null);
-  const [cat, setCat] = useState({ recintos: [], labores: [], maquinaria: [], aperos: [], trabajadores: [], productos: [], campana: null, cultivos: [] });
+  const [cat, setCat] = useState({ recintos: [], labores: [], maquinaria: [], aperos: [], trabajadores: [], productos: [], campana: null, campanas: [], cultivos: [] });
   const [gps, setGps] = useState(null);
   const [online, setOnline] = useState(true);
   const [pendientes, setPendientes] = useState(0);
@@ -91,7 +91,7 @@ export default function AppProvider({ children }) {
       const [rec, lab, maq, ape, tra, pro, camp, cul] = await Promise.all([
         supabase
           .from("recintos")
-          .select("*, parcelas(nombre, finca_id, fincas(nombre)), recinto_cultivos(campana_id, variedad, cultivos(nombre))")
+          .select("*, parcelas(nombre, finca_id, fincas(nombre)), recinto_cultivos(campana_id, cultivo_id, variedad, cultivos(nombre))")
           .eq("empresa_id", empresaId)
           .eq("activo", true),
         supabase.from("labores").select("*").eq("empresa_id", empresaId).eq("activa", true).order("nombre"),
@@ -99,21 +99,25 @@ export default function AppProvider({ children }) {
         supabase.from("aperos").select("*").eq("empresa_id", empresaId).eq("activo", true).order("nombre"),
         supabase.from("trabajadores").select("*").eq("empresa_id", empresaId).eq("activo", true).order("nombre"),
         supabase.from("productos").select("*").eq("empresa_id", empresaId).eq("activo", true).order("nombre"),
-        supabase.from("campanas").select("*").eq("empresa_id", empresaId).eq("activa", true).maybeSingle(),
+        supabase.from("campanas").select("*, cultivos(nombre)").eq("empresa_id", empresaId).order("fecha_inicio", { ascending: false }),
         supabase.from("cultivos").select("*").or(`empresa_id.is.null,empresa_id.eq.${empresaId}`).order("nombre"),
       ]);
       if (rec.error) throw rec.error;
-      const campana = camp.data || null;
+      // Cada cultivo tiene su campaña; "campana" = la activa más reciente (compatibilidad)
+      const campanas = (camp.data || []).map((c) => ({ ...c, cultivo_nombre: c.cultivos?.nombre || null }));
+      const activas = new Set(campanas.filter((c) => c.activa).map((c) => c.id));
+      const campana = campanas.find((c) => c.activa) || null;
       const porParcela = {};
       for (const r of rec.data || []) porParcela[r.parcela_id] = (porParcela[r.parcela_id] || 0) + 1;
       const recintos = (rec.data || [])
         .map((r) => {
-          const rc = (r.recinto_cultivos || []).find((x) => x.campana_id === campana?.id) || r.recinto_cultivos?.[0];
+          const rc = (r.recinto_cultivos || []).find((x) => activas.has(x.campana_id)) || r.recinto_cultivos?.[0];
           return {
             ...r,
             parcela_nombre: r.parcelas?.nombre,
             finca_nombre: r.parcelas?.fincas?.nombre,
             cultivo: rc?.cultivos?.nombre || null,
+            cultivo_id: rc?.cultivo_id || null,
             variedad: rc?.variedad || null,
             n_en_parcela: porParcela[r.parcela_id],
           };
@@ -133,6 +137,7 @@ export default function AppProvider({ children }) {
         trabajadores: tra.data || [],
         productos,
         campana,
+        campanas,
         cultivos: cul.data || [],
       };
       setCat(nuevo);

@@ -15,7 +15,7 @@ const CATEGORIAS = ["labor", "tratamiento", "fertilizacion", "herbicida", "recol
 
 export default function Ajustes() {
   const app = useApp();
-  const { empresaId, rol, esGestor, perfil, campana, trabajadores, labores, maquinaria, aperos, recargar, notificar, cargarEmpresas } = app;
+  const { empresaId, rol, esGestor, perfil, campanas, cultivos, trabajadores, labores, maquinaria, aperos, recargar, notificar, cargarEmpresas } = app;
   const esAdmin = ["propietario", "administrador"].includes(rol);
   const [emp, setEmp] = useState(null);
   const [miembros, setMiembros] = useState([]);
@@ -104,16 +104,22 @@ export default function Ajustes() {
       )}
 
       {esGestor && (
-        <Seccion titulo="Campaña" accion={esAdmin && <button type="button" className="text-sm font-bold text-olivo-700" onClick={() => setHoja({ tipo: "campana" })}>+ Nueva</button>}>
-          <Tarjeta>
-            {campana ? (
-              <p className="text-lg font-bold">
-                {campana.nombre} <span className="text-[15px] font-normal text-stone-500">· {fechaCorta(campana.fecha_inicio)} – {fechaCorta(campana.fecha_fin)}</span>
-              </p>
-            ) : (
-              <p>Sin campaña activa.</p>
-            )}
-          </Tarjeta>
+        <Seccion titulo="Campañas por cultivo" accion={<button type="button" className="text-sm font-bold text-olivo-700" onClick={() => setHoja({ tipo: "campana" })}>+ Nueva</button>}>
+          <p className="mb-2 text-sm text-stone-500">Cada cultivo lleva su propia campaña. Toca una para cambiar sus fechas.</p>
+          <div className="space-y-2">
+            {campanas.map((c) => (
+              <button key={c.id} type="button" onClick={() => setHoja({ tipo: "campana", item: c })} className="flex w-full items-center justify-between rounded-2xl bg-white p-3 text-left shadow-sm">
+                <span>
+                  <b>{c.nombre}</b>
+                  <span className="block text-sm text-stone-500">
+                    {c.cultivo_nombre || "General"} · {fechaCorta(c.fecha_inicio)} {c.fecha_inicio?.slice(0, 4)} – {fechaCorta(c.fecha_fin)} {c.fecha_fin?.slice(0, 4)}
+                  </span>
+                </span>
+                {c.activa ? <Etiqueta>En curso</Etiqueta> : <Etiqueta color="gris">Cerrada</Etiqueta>}
+              </button>
+            ))}
+            {!campanas.length && <p className="text-stone-500">Aún no hay campañas: se crean solas al asignar un cultivo a una parcela.</p>}
+          </div>
         </Seccion>
       )}
 
@@ -182,8 +188,8 @@ export default function Ajustes() {
         </Seccion>
       )}
 
-      <Hoja abierta={!!hoja} onCerrar={() => setHoja(null)} titulo={{ campana: "Nueva campaña", invitar: "Invitar al equipo", trabajador: "Trabajador", labor: "Labor" }[hoja?.tipo]}>
-        {hoja?.tipo === "campana" && <FormCampana empresaId={empresaId} actual={campana} onHecho={hecho} />}
+      <Hoja abierta={!!hoja} onCerrar={() => setHoja(null)} titulo={{ campana: hoja?.item ? "Editar campaña" : "Nueva campaña", invitar: "Invitar al equipo", trabajador: "Trabajador", labor: "Labor" }[hoja?.tipo]}>
+        {hoja?.tipo === "campana" && <FormCampana empresaId={empresaId} item={hoja.item} cultivos={cultivos} campanas={campanas} onHecho={hecho} />}
         {hoja?.tipo === "invitar" && <FormInvitar empresaId={empresaId} trabajadores={trabajadores} onHecho={hecho} />}
         {hoja?.tipo === "trabajador" && <FormTrabajador empresaId={empresaId} item={hoja.item} onHecho={hecho} />}
         {hoja?.tipo === "labor" && <FormLabor empresaId={empresaId} item={hoja.item} maquinaria={maquinaria} aperos={aperos} onHecho={hecho} />}
@@ -192,34 +198,63 @@ export default function Ajustes() {
   );
 }
 
-function FormCampana({ empresaId, actual, onHecho }) {
-  const sig = actual ? new Date(new Date(actual.fecha_fin).getTime() + 86400000).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10);
-  const [f, setF] = useState({ nombre: "", fecha_inicio: sig, fecha_fin: "" });
-  async function guardar() {
-    if (actual) await supabase.from("campanas").update({ activa: false }).eq("id", actual.id);
-    const { error } = await supabase.from("campanas").insert({ empresa_id: empresaId, ...f, activa: true });
-    if (error) {
-      if (actual) await supabase.from("campanas").update({ activa: true }).eq("id", actual.id);
-      return alert(error.message);
-    }
-    onHecho("Nueva campaña activa ✓");
+function FormCampana({ empresaId, item, cultivos, campanas, onHecho }) {
+  const [f, setF] = useState(item ? { nombre: item.nombre, cultivo_id: item.cultivo_id, fecha_inicio: item.fecha_inicio, fecha_fin: item.fecha_fin, activa: item.activa } : { nombre: "", cultivo_id: null, fecha_inicio: "", fecha_fin: "", activa: true });
+  const [guardando, setGuardando] = useState(false);
+
+  function elegirCultivo(id) {
+    const c = cultivos.find((x) => x.id === id);
+    const y = new Date().getFullYear();
+    const oliv = c?.nombre?.toLowerCase().startsWith("olivar");
+    const ini = oliv ? `${new Date().getMonth() >= 9 ? y : y - 1}-10-01` : `${y}-01-01`;
+    const fin = oliv ? `${Number(ini.slice(0, 4)) + 1}-09-30` : `${y}-12-31`;
+    setF({ ...f, cultivo_id: id, fecha_inicio: f.fecha_inicio || ini, fecha_fin: f.fecha_fin || fin, nombre: f.nombre || `${c?.nombre || "Campaña"} ${oliv ? `${ini.slice(0, 4)}/${fin.slice(2, 4)}` : y}` });
   }
+
+  async function guardar() {
+    if (f.fecha_fin < f.fecha_inicio) return alert("La fecha de fin no puede ser anterior al inicio");
+    setGuardando(true);
+    try {
+      // Solo una campaña en curso por cultivo
+      if (f.activa) {
+        const otras = campanas.filter((c) => c.activa && c.id !== item?.id && (c.cultivo_id || null) === (f.cultivo_id || null)).map((c) => c.id);
+        if (otras.length) await supabase.from("campanas").update({ activa: false }).in("id", otras);
+      }
+      const datos = { empresa_id: empresaId, nombre: f.nombre, cultivo_id: f.cultivo_id || null, fecha_inicio: f.fecha_inicio, fecha_fin: f.fecha_fin, activa: !!f.activa };
+      const { error } = item ? await supabase.from("campanas").update(datos).eq("id", item.id) : await supabase.from("campanas").insert(datos);
+      if (error) throw error;
+      onHecho(item ? "Campaña actualizada ✓" : "Campaña creada ✓");
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setGuardando(false);
+    }
+  }
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      <div>
+        <p className="mb-2 text-sm font-semibold text-stone-700">Cultivo</p>
+        <Fichas opciones={cultivos.map((c) => ({ value: c.id, label: c.nombre }))} valor={f.cultivo_id} onCambio={elegirCultivo} />
+      </div>
       <Campo etiqueta="Nombre">
-        <Input value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} placeholder="Campaña 2027" />
+        <Input value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} placeholder="Olivar 2026/27" />
       </Campo>
       <div className="grid grid-cols-2 gap-2">
-        <Campo etiqueta="Inicio">
+        <Campo etiqueta="Empieza">
           <Input type="date" value={f.fecha_inicio} onChange={(e) => setF({ ...f, fecha_inicio: e.target.value })} />
         </Campo>
-        <Campo etiqueta="Fin">
+        <Campo etiqueta="Termina">
           <Input type="date" value={f.fecha_fin} onChange={(e) => setF({ ...f, fecha_fin: e.target.value })} />
         </Campo>
       </div>
-      <p className="text-sm text-stone-500">Los cultivos de cada recinto se asignan por campaña: revísalos en Parcelas tras crearla.</p>
-      <Boton grande className="w-full" disabled={!f.nombre || !f.fecha_fin} onClick={guardar}>
-        Crear y activar
+      <label className="flex items-center gap-2 text-[15px] font-semibold">
+        <input type="checkbox" className="h-5 w-5 accent-olivo-700" checked={!!f.activa} onChange={(e) => setF({ ...f, activa: e.target.checked })} />
+        Es la campaña en curso de este cultivo
+      </label>
+      <p className="text-sm text-stone-500">Los trabajos, tratamientos y entregas se asignan a la campaña de su cultivo según la fecha.</p>
+      <Boton grande className="w-full" disabled={!f.nombre || !f.fecha_inicio || !f.fecha_fin || guardando} onClick={guardar}>
+        Guardar
       </Boton>
     </div>
   );
