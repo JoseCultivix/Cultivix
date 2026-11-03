@@ -3,6 +3,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "./AppProvider";
 import { Boton, Campo, Fichas, Input, claseInput } from "./ui";
 import { euros, hoyISO, nombreRecinto, num } from "@/lib/formato";
+import ComprobacionFito from "./ComprobacionFito";
+
+const SISTEMAS_RIEGO = [["goteo", "Goteo"], ["aspersion", "Aspersión"], ["microaspersion", "Microaspersión"], ["gravedad", "A manta / gravedad"], ["pivot", "Pívot"], ["otro", "Otro"]];
 
 export const CATEGORIAS_APLICACION = ["tratamiento", "fertilizacion", "herbicida"];
 const METODOS_FERTILIZACION = [["abonadora", "Abonadora"], ["fertirrigacion", "Fertirrigación"], ["foliar", "Foliar"], ["localizado", "Localizado"], ["enterrado", "Enterrado"], ["cuba", "Cuba"]];
@@ -28,7 +31,7 @@ export function habitualesDe(labor) {
  * modo "iniciar": sin horas (el trabajo empieza ahora). modo "completo": fecha + horas.
  */
 export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar, onCancelar, textoGuardar = "Guardar", guardando }) {
-  const { labores, recintos, maquinaria, aperos, trabajadores, productos, esGestor, deteccion, perfil } = useApp();
+  const { labores, recintos, maquinaria, aperos, trabajadores, productos, esGestor, deteccion, perfil, cultivos, online } = useApp();
   const yo = trabajadores.find((t) => t.usuario_id === perfil?.id);
 
   const [laborId, setLaborId] = useState(inicial.labor_id || null);
@@ -53,6 +56,8 @@ export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar
   const [motivo, setMotivo] = useState(inicial.aplicacion?.plaga_o_motivo || "");
   const [metodo, setMetodo] = useState(inicial.aplicacion?.metodo_aplicacion || "");
   const [justificacion, setJustificacion] = useState(inicial.aplicacion?.justificacion || "");
+  const [caldo, setCaldo] = useState(inicial.aplicacion?.volumen_caldo_l_ha ?? "");
+  const [riego, setRiego] = useState({ sistema: inicial.riego?.sistema || "", m3_ha: inicial.riego?.m3_ha ?? "", volumen_m3: inicial.riego?.volumen_m3 ?? "", porHa: inicial.riego?.volumen_m3 != null && inicial.riego?.m3_ha == null ? false : true, fertirrigacion: !!inicial.riego?.fertirrigacion });
   const [verTodasLabores, setVerTodasLabores] = useState(false);
   const [verTodosRecintos, setVerTodosRecintos] = useState(false);
 
@@ -144,7 +149,17 @@ export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar
         plaga_o_motivo: motivo || null,
         metodo_aplicacion: metodo || null,
         justificacion: justificacion || null,
+        volumen_caldo_l_ha: caldo === "" ? null : String(caldo).replace(",", "."),
         productos: prods.map((p) => ({ ...p, dosis_ha: String(p.dosis_ha).replace(",", ".") })),
+      };
+    }
+    if (labor?.categoria === "riego") {
+      const n = (x) => (x === "" || x == null ? null : String(x).replace(",", "."));
+      payload.riego = {
+        sistema: riego.sistema || null,
+        m3_ha: riego.porHa ? n(riego.m3_ha) : null,
+        volumen_m3: riego.porHa ? null : n(riego.volumen_m3),
+        fertirrigacion: riego.fertirrigacion,
       };
     }
     onGuardar(payload);
@@ -200,7 +215,8 @@ export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar
           {prods.map((p, i) => {
             const pr = productos.find((x) => x.id === p.producto_id);
             return (
-              <div key={p.producto_id} className="mt-3 flex items-center gap-2">
+              <div key={p.producto_id} className="mt-3">
+              <div className="flex items-center gap-2">
                 <span className="min-w-0 flex-1 truncate font-semibold">{pr?.nombre}</span>
                 <input
                   inputMode="decimal"
@@ -210,6 +226,17 @@ export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar
                   onChange={(e) => setProds(prods.map((x, j) => (j === i ? { ...x, dosis_ha: e.target.value } : x)))}
                 />
                 <span className="w-12 text-sm text-stone-600">{p.unidad_dosis}</span>
+              </div>
+              <ComprobacionFito
+                producto={pr}
+                recintos={recintos.filter((r) => recintoIds.includes(r.id))}
+                cultivos={cultivos}
+                dosisHa={Number(String(p.dosis_ha).replace(",", ".")) || 0}
+                caldoHa={Number(String(caldo).replace(",", ".")) || 0}
+                plaga={motivo}
+                fecha={fecha}
+                online={online}
+              />
               </div>
             );
           })}
@@ -225,9 +252,55 @@ export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar
             valor={metodo}
             onCambio={(v) => setMetodo(v || "")}
           />
+          {labor.categoria !== "fertilizacion" && prods.length > 0 && (
+            <div className="mt-3 flex items-center gap-2">
+              <span className="text-sm font-semibold text-tierra-700">Caldo</span>
+              <input inputMode="decimal" className={`${claseInput} w-28 text-right`} value={caldo} placeholder="litros" onChange={(e) => setCaldo(e.target.value)} />
+              <span className="text-sm text-stone-600">l/ha</span>
+            </div>
+          )}
           {labor.categoria !== "fertilizacion" && (
             <Input className="mt-3" placeholder="Justificación (opcional: umbral, aviso, recomendación del asesor…)" value={justificacion} onChange={(e) => setJustificacion(e.target.value)} />
           )}
+        </div>
+      )}
+
+      {labor?.categoria === "riego" && (
+        <div className="rounded-2xl border-2 border-sky-100 bg-sky-50 p-3">
+          <p className="mb-2 text-sm font-bold text-sky-800">💧 Agua aplicada</p>
+          <div className="mb-2 flex gap-2">
+            {[
+              [true, "Por hectárea (m³/ha)"],
+              [false, "Total (m³)"],
+            ].map(([v, t]) => (
+              <button key={t} type="button" onClick={() => setRiego({ ...riego, porHa: v })} className={`rounded-full px-3 py-1.5 text-sm font-bold ${riego.porHa === v ? "bg-sky-700 text-white" : "bg-white text-stone-700"}`}>
+                {t}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              inputMode="decimal"
+              className={`${claseInput} w-32 text-right`}
+              value={riego.porHa ? riego.m3_ha : riego.volumen_m3}
+              placeholder="0"
+              onChange={(e) => setRiego(riego.porHa ? { ...riego, m3_ha: e.target.value } : { ...riego, volumen_m3: e.target.value })}
+            />
+            <span className="text-sm text-stone-600">{riego.porHa ? "m³/ha" : "m³ en total"}</span>
+          </div>
+          {superficie > 0 && (Number(String(riego.porHa ? riego.m3_ha : riego.volumen_m3).replace(",", ".")) || 0) > 0 && (
+            <p className="mt-1 text-xs text-sky-800">
+              {riego.porHa
+                ? `≈ ${num((Number(String(riego.m3_ha).replace(",", ".")) || 0) * superficie, 0)} m³ en ${num(superficie)} ha (${num((Number(String(riego.m3_ha).replace(",", ".")) || 0) / 10, 1)} mm)`
+                : `≈ ${num((Number(String(riego.volumen_m3).replace(",", ".")) || 0) / superficie, 1)} m³/ha en ${num(superficie)} ha`}
+            </p>
+          )}
+          <p className="mb-1 mt-3 text-sm font-bold text-sky-800">Sistema</p>
+          <Fichas opciones={SISTEMAS_RIEGO.map(([value, label]) => ({ value, label }))} valor={riego.sistema} onCambio={(v) => setRiego({ ...riego, sistema: v || "" })} />
+          <label className="mt-2 flex items-center gap-2 text-sm">
+            <input type="checkbox" className="h-5 w-5" checked={riego.fertirrigacion} onChange={(e) => setRiego({ ...riego, fertirrigacion: e.target.checked })} />
+            Con abono (fertirrigación)
+          </label>
         </div>
       )}
 

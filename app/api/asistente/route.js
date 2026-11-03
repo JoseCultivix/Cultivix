@@ -53,6 +53,16 @@ const HERRAMIENTA = {
           productos_nuevos: { type: "array", items: { type: "string" }, description: "Nombres de productos mencionados que NO están en su catálogo." },
         },
       },
+      riego: {
+        type: "object",
+        description: "Solo si el trabajo es un riego: agua aplicada y sistema.",
+        properties: {
+          m3_ha: { type: "number", description: "m³ por hectárea (1 mm = 10 m³/ha)" },
+          volumen_m3: { type: "number", description: "m³ en total si los da así (contador)" },
+          sistema: { type: "string", enum: ["goteo", "aspersion", "microaspersion", "gravedad", "pivot", "otro"] },
+          fertirrigacion: { type: "boolean" },
+        },
+      },
       observacion: {
         type: "object",
         properties: {
@@ -126,6 +136,7 @@ Reglas:
 - Propón la maquinaria y apero habituales de la labor si no dice otros.
 - Si no menciona trabajadores, déjalo vacío (se asigna quien registra).
 - Fechas relativas respecto a hoy: ${ahora.texto} (hoy = ${ahora.iso}). "Esta mañana" → hoy, hora_inicio 08:00 si no dice otra.
+- Riegos: elige la labor de categoría riego y rellena "riego" con el agua (m³/ha, mm o m³ totales) y el sistema si lo dice.
 - Tratamientos/abonados: elige la labor de categoría tratamiento/fertilizacion/herbicida que mejor encaje y rellena "aplicacion". Si dice la dosis, úsala; si no, la habitual del producto o deja vacío y anótalo en dudas. Comprar un producto NO es aplicarlo.
 - Consultas: responde con datos concretos (horas, costes, fechas, cantidades) calculados de los datos de abajo. Si no hay datos suficientes, dilo. No des recomendaciones de dosis de fitosanitarios más allá de lo registrado: la decisión técnica es del agricultor y su asesor.
 - Rol del usuario: ${rol}${gestor ? "" : " (trabajador: no tiene acceso a datos económicos; no los menciones)"}.
@@ -150,7 +161,7 @@ ${lista(pro.data || [], (p) => `${p.id} | ${p.nombre} | ${p.tipo} | ${p.unidad} 
 ${lista(camp.data || [], (c) => `${c.cultivos?.nombre || "General"}: ${c.nombre} (${c.fecha_inicio} a ${c.fecha_fin})`)}
 
 === PARTES ÚLTIMOS 12 MESES (fecha | labor | parcelas | horas | estado${gestor ? " | coste €" : ""} | productos) ===
-${lista(partes.data || [], (p) => `${p.fecha} | ${nomLab[p.labor_id] || "-"} | ${(p.partes_trabajo_recintos || []).map((x) => nomRec[x.recinto_id]).join(", ")} | ${p.horas_totales ?? "-"} | ${p.estado}${gestor ? ` | ${costes[p.id] ?? "-"}` : ""} | ${(p.aplicaciones?.[0]?.aplicaciones_productos || []).map((x) => `${nomPro[x.producto_id]} ${x.dosis_ha ?? ""}/ha (${x.cantidad_total ?? "?"})`).join("; ")}`)}
+${lista(partes.data || [], (p) => `${p.fecha} | ${nomLab[p.labor_id] || "-"} | ${(p.partes_trabajo_recintos || []).map((x) => nomRec[x.recinto_id]).join(", ")} | ${p.horas_totales ?? "-"} | ${p.estado}${gestor ? ` | ${costes[p.id] ?? "-"}` : ""} | ${([].concat(p.aplicaciones || [])[0]?.aplicaciones_productos || []).map((x) => `${nomPro[x.producto_id]} ${x.dosis_ha ?? ""}/ha (${x.cantidad_total ?? "?"})`).join("; ")}`)}
 ${gestor ? `\n=== COMPRAS ÚLTIMOS 12 MESES (fecha | proveedor | total € | líneas) ===\n${lista(compras.data || [], (c) => `${c.fecha} | ${c.proveedores?.nombre || "-"} | ${c.total ?? "-"} | ${(c.albaranes_compra_lineas || []).map((l) => `${l.descripcion} ${l.cantidad ?? ""}${l.unidad ?? ""} ${l.importe ?? ""}€`).join("; ")}`)}` : ""}`;
 
     // La API exige empezar por "user" y alternar turnos: se fusionan los consecutivos

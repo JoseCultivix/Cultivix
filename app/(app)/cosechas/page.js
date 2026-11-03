@@ -264,6 +264,19 @@ function FormEntrega({ item, destinos, entregas, onHecho }) {
   const sugeridas = [...new Set([...(CALIDADES[(cultivo?.nombre || "").toLowerCase()] || ["Extra", "Primera", "Segunda"]), ...entregas.filter((e) => e.cultivo_id === f.cultivo_id && e.calidad).map((e) => e.calidad)])];
   const recintosCultivo = recintos.filter((r) => !f.cultivo_id || r.cultivo_id === f.cultivo_id || f.recinto_ids.includes(r.id));
 
+  // Aviso si alguna parcela está dentro del plazo de seguridad de un tratamiento
+  const [enPlazo, setEnPlazo] = useState([]);
+  useEffect(() => {
+    if (!f.recinto_ids.length || !f.fecha) return setEnPlazo([]);
+    supabase
+      .from("v_plazos_seguridad")
+      .select("recinto_id, parcela, producto, fecha_segura")
+      .in("recinto_id", f.recinto_ids)
+      .gt("fecha_segura", f.fecha)
+      .lte("fecha", f.fecha)
+      .then(({ data }) => setEnPlazo(data || []));
+  }, [f.recinto_ids.join(","), f.fecha]); // eslint-disable-line
+
   // Foto del ticket: se archiva y, si la IA está activa, rellena los datos
   async function fotoTicket(ev) {
     const file = ev.target.files?.[0];
@@ -394,6 +407,12 @@ function FormEntrega({ item, destinos, entregas, onHecho }) {
       <div>
         <p className="mb-2 text-sm font-bold text-stone-700">¿De qué parcelas? <span className="font-normal text-stone-500">(opcional, para la rentabilidad por parcela)</span></p>
         <Fichas multiple opciones={recintosCultivo.map((r) => ({ value: r.id, label: nombreRecinto(r, r.n_en_parcela) }))} valor={f.recinto_ids} onCambio={(v) => set("recinto_ids", v)} vacio="No hay parcelas con este cultivo." />
+        {enPlazo.length > 0 && (
+          <div className="mt-2 rounded-xl bg-red-100 p-2 text-sm font-semibold text-red-900">
+            ⚠️ Plazo de seguridad sin cumplir:{" "}
+            {enPlazo.map((x) => `${x.parcela} (${x.producto}, se puede cosechar desde el ${new Date(x.fecha_segura + "T12:00").toLocaleDateString("es-ES")})`).join("; ")}. Si la almazara o la cooperativa analiza residuos, podría rechazar la partida.
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-2">

@@ -1,9 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import { Boton, Campo, Etiqueta, Hoja, Input, Pagina, Select, Vacio } from "@/components/ui";
 import { euros, fechaCorta, num } from "@/lib/formato";
+import { fichaRegistro, usosRegistro } from "@/lib/fitos";
 
 const TIPOS = ["fitosanitario", "fertilizante", "herbicida", "bioestimulante", "semilla", "gasoil", "otro"];
 
@@ -81,6 +82,67 @@ export default function Productos() {
   );
 }
 
+function BuscarRegistro({ onElegir, codigos }) {
+  const [q, setQ] = useState("");
+  const [res, setRes] = useState(null);
+  const [buscando, setBuscando] = useState(false);
+  async function buscar() {
+    if (q.trim().length < 2) return;
+    setBuscando(true);
+    const { data } = await supabase.rpc("fito_buscar", { p_texto: q.trim(), p_codigo_cultivo: codigos[0] || null });
+    setRes(data || []);
+    setBuscando(false);
+  }
+  return (
+    <div className="rounded-2xl border-2 border-olivo-100 bg-white p-3">
+      <p className="mb-2 text-sm font-bold text-olivo-800">Buscar en el Registro de Fitosanitarios del MAPA</p>
+      <div className="flex gap-2">
+        <Input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && buscar()} placeholder="Nombre, nº de registro o materia activa" />
+        <Boton onClick={buscar} disabled={buscando}>
+          {buscando ? "…" : "Buscar"}
+        </Boton>
+      </div>
+      {res && res.length === 0 && <p className="mt-2 text-sm text-stone-500">Nada encontrado.</p>}
+      {res?.length > 0 && (
+        <div className="mt-2 max-h-72 space-y-1 overflow-y-auto">
+          {res.map((r) => (
+            <button key={r.registro + r.producto} type="button" onClick={() => onElegir(r)} className="block w-full rounded-xl bg-stone-50 p-2 text-left text-sm active:bg-olivo-50">
+              <b>{r.producto}</b> <span className="text-stone-500">· nº {r.registro}</span>
+              <span className="block text-xs text-stone-600">{r.formulado}</span>
+              <span className={`text-xs font-semibold ${r.estado === "Vigente" ? "text-olivo-700" : "text-red-700"}`}>{r.estado}</span>
+              {r.en_cultivo === true && <span className="ml-2 text-xs font-semibold text-olivo-700">· autorizado en tu cultivo</span>}
+              {r.en_cultivo === false && <span className="ml-2 text-xs text-stone-500">· no autorizado en tu cultivo principal</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FichaRegistro({ registro }) {
+  const [f, setF] = useState(undefined);
+  useEffect(() => {
+    let vivo = true;
+    if (!registro) return setF(undefined);
+    fichaRegistro(registro).then((x) => vivo && setF(x));
+    return () => {
+      vivo = false;
+    };
+  }, [registro]);
+  if (!registro || f === undefined) return null;
+  if (!f) return <p className="rounded-xl bg-red-50 p-2 text-sm text-red-800">⚠️ El nº {registro} no aparece en el Registro del MAPA.</p>;
+  return (
+    <p className={`rounded-xl p-2 text-sm ${f.estado === "Vigente" ? "bg-olivo-50 text-olivo-900" : "bg-red-50 text-red-800"}`}>
+      Registro MAPA: <b>{f.producto}</b> · {f.estado}
+      {f.caducidad ? ` · autorizado hasta ${fechaCorta(f.caducidad)} ${f.caducidad.slice(0, 4)}` : ""}
+      <span className="block text-xs opacity-80">
+        {f.titular} · datos del {f.fecha_datos ? new Date(f.fecha_datos + "T12:00").toLocaleDateString("es-ES") : "—"}
+      </span>
+    </p>
+  );
+}
+
 function FormProducto({ p, empresaId, onHecho }) {
   const [f, setF] = useState({ nombre: "", tipo: "fitosanitario", unidad: "kg", materia_activa: "", numero_registro: "", dosis_habitual_ha: "", plazo_seguridad_dias: "", riqueza_n: "", riqueza_p2o5: "", riqueza_k2o: "", densidad_kg_l: "", n_organico: false, ...p });
   const [ajuste, setAjuste] = useState("");
@@ -111,8 +173,22 @@ function FormProducto({ p, empresaId, onHecho }) {
     onHecho("Producto guardado ✓");
   }
 
+  const { cultivos, recintos } = useApp();
+  const codigos = [...new Set(recintos.map((r) => cultivos.find((c) => c.id === r.cultivo_id)?.codigo_mapa).filter(Boolean))];
+  async function elegir(r) {
+    const nuevo = { ...f, numero_registro: r.registro, materia_activa: f.materia_activa || r.formulado || "", nombre: f.nombre || r.producto };
+    try {
+      const usos = await usosRegistro(r.registro, codigos);
+      const dias = usos.filter((u) => u.relacion !== "inferior").map((u) => u.plazo_dias).filter((x) => x != null);
+      if (dias.length && !f.plazo_seguridad_dias) nuevo.plazo_seguridad_dias = Math.max(...dias);
+    } catch {}
+    setF(nuevo);
+  }
+  const esFito = f.tipo === "fitosanitario" || f.tipo === "herbicida";
   return (
     <div className="space-y-3">
+      {esFito && <BuscarRegistro onElegir={elegir} codigos={codigos} />}
+      {esFito && <FichaRegistro registro={f.numero_registro} />}
       <Campo etiqueta="Nombre comercial">
         <Input {...c("nombre")} />
       </Campo>

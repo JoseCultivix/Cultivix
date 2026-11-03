@@ -110,6 +110,7 @@ function Asistente() {
         productos: p.aplicacion.productos.map((x) => ({ producto_id: x.producto_id, dosis_ha: x.dosis_ha ?? null, unidad_dosis: x.unidad_dosis || "kg/ha" })),
       };
     }
+    if (p.riego && (p.riego.m3_ha != null || p.riego.volumen_m3 != null)) out.riego = p.riego;
     return out;
   }
 
@@ -244,6 +245,7 @@ function Asistente() {
               ...(editar.p.parte || {}),
               recinto_ids: editar.p.parte?.recinto_ids?.length ? editar.p.parte.recinto_ids : deteccion?.recinto ? [deteccion.recinto.id] : [],
               aplicacion: editar.p.aplicacion,
+              riego: editar.p.riego,
             }}
             textoGuardar={editar.p.tipo === "iniciar_trabajo" ? "▶ Empezar" : "Guardar"}
             guardando={guardando}
@@ -279,6 +281,8 @@ function Propuesta({ p, estado, ctx, guardando, onConfirmar, onEditar, onDescart
       filas.push(["Producto", `${x?.nombre || "?"}${pr.dosis_ha ? ` · ${num(pr.dosis_ha)} ${pr.unidad_dosis || ""}` : " · dosis ❓"}`]);
     }
     if (p.aplicacion?.plaga_o_motivo) filas.push(["Motivo", p.aplicacion.plaga_o_motivo]);
+    if (p.riego?.m3_ha != null) filas.push(["Agua", `${p.riego.m3_ha} m³/ha${p.riego.sistema ? " · " + p.riego.sistema : ""}`]);
+    else if (p.riego?.volumen_m3 != null) filas.push(["Agua", `${p.riego.volumen_m3} m³${p.riego.sistema ? " · " + p.riego.sistema : ""}`]);
   }
   const incompleta = p.tipo !== "registrar_observacion" && (!p.parte?.labor_id || (p.tipo === "registrar_trabajo" && !p.parte?.horas));
 

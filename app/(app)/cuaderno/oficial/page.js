@@ -223,6 +223,7 @@ function Documento({ d, ccaa, periodo }) {
         cols={[
           ["fecha", "Fecha", (f) => new Date(f.fecha + "T12:00").toLocaleDateString("es-ES")], ["parcelas_orden", "Parcelas (nº)"], ["cultivo", "Cultivo"], ["superficie", "Sup. tratada (ha)", (f) => n2(f.superficie)], ["plaga_o_motivo", "Problema fitosanitario"],
           ["aplicador_orden", "Aplicador (nº)"], ["equipo_orden", "Equipo (nº)"], ["producto", "Producto"], ["numero_registro", "Nº registro"], ["dosis_ha", "Dosis", (f) => `${n2(f.dosis_ha)} ${f.unidad_dosis || ""}`], ["eficacia", "Eficacia"], ["justificacion", "Observaciones", (f) => [f.metodo, f.justificacion, f.asesor].filter(Boolean).join(" · ")],
+          ["registro_aviso", "Registro MAPA", (f) => <span className={f.registro_aviso?.startsWith("✓") ? "text-olivo-700" : "font-semibold text-red-700"}>{f.registro_aviso || ""}</span>],
         ]}
         filas={d.tratamientos}
       />
@@ -256,6 +257,15 @@ function Documento({ d, ccaa, periodo }) {
           ["numero_ticket", "Nº albarán / ticket"], ["destino", "Cliente"], ["destino_nif", "NIF cliente"],
         ]}
         filas={d.cosecha}
+      />
+
+      <H>6. Riegos</H>
+      <Tabla
+        cols={[
+          ["fecha", "Fecha", (f) => new Date(f.fecha + "T12:00").toLocaleDateString("es-ES")], ["parcelas_orden", "Parcelas (nº)"], ["cultivo", "Cultivo"], ["superficie", "Sup. (ha)", (f) => n2(f.superficie)],
+          ["sistema_txt", "Sistema"], ["m3_ha", "m³/ha", (f) => n2(f.m3_ha)], ["m3", "m³ total", (f) => num(f.m3, 0)], ["fertirrigacion", "Fertirrigación", (f) => (f.fertirrigacion ? "Sí" : "No")],
+        ]}
+        filas={d.riegos}
       />
 
       <div className="mt-8 grid grid-cols-2 gap-8 text-[13px] print:text-[9px]">

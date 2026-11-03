@@ -28,7 +28,7 @@ export default function Partes() {
     let q = supabase
       .from("partes_trabajo")
       .select(
-        "*, partes_trabajo_recintos(recinto_id), partes_trabajo_trabajadores(trabajador_id, horas), partes_trabajo_maquinaria(maquinaria_id), partes_trabajo_aperos(apero_id), aplicaciones(tipo, plaga_o_motivo, metodo_aplicacion, justificacion, aplicaciones_productos(producto_id, dosis_ha, unidad_dosis))"
+        "*, partes_trabajo_recintos(recinto_id), partes_trabajo_trabajadores(trabajador_id, horas), partes_trabajo_maquinaria(maquinaria_id), partes_trabajo_aperos(apero_id), riegos_parte(sistema, m3_ha, volumen_m3, fertirrigacion), aplicaciones(tipo, plaga_o_motivo, metodo_aplicacion, justificacion, volumen_caldo_l_ha, aplicaciones_productos(producto_id, dosis_ha, unidad_dosis))"
       )
       .eq("empresa_id", empresaId)
       .order("fecha", { ascending: false })
@@ -36,8 +36,10 @@ export default function Partes() {
       .limit(150);
     if (filtro !== "todos") q = q.eq("estado", filtro);
     else q = q.neq("estado", "descartado");
-    const { data } = await q;
-    setPartes(data || []);
+    const { data: crudo } = await q;
+    // aplicaciones y riegos_parte son 1 a 1 con el parte: PostgREST los devuelve como objeto, no como lista
+    const data = (crudo || []).map((x) => ({ ...x, aplicaciones: x.aplicaciones ? [].concat(x.aplicaciones) : [] }));
+    setPartes(data);
     if (esGestor && data?.length) {
       const { data: c } = await supabase.from("v_partes_coste").select("*").in("parte_trabajo_id", data.map((p) => p.id));
       setCostes(Object.fromEntries((c || []).map((x) => [x.parte_trabajo_id, Number(x.coste_mano_obra) + Number(x.coste_maquinaria) + Number(x.coste_productos)])));
@@ -160,8 +162,9 @@ export default function Partes() {
                 maquinaria_ids: editando.partes_trabajo_maquinaria.map((x) => x.maquinaria_id),
                 apero_ids: editando.partes_trabajo_aperos.map((x) => x.apero_id),
                 aplicacion: editando.aplicaciones?.[0]
-                  ? { plaga_o_motivo: editando.aplicaciones[0].plaga_o_motivo, metodo_aplicacion: editando.aplicaciones[0].metodo_aplicacion, justificacion: editando.aplicaciones[0].justificacion, productos: editando.aplicaciones[0].aplicaciones_productos }
+                  ? { plaga_o_motivo: editando.aplicaciones[0].plaga_o_motivo, metodo_aplicacion: editando.aplicaciones[0].metodo_aplicacion, justificacion: editando.aplicaciones[0].justificacion, volumen_caldo_l_ha: editando.aplicaciones[0].volumen_caldo_l_ha, productos: editando.aplicaciones[0].aplicaciones_productos }
                   : undefined,
+                riego: (Array.isArray(editando.riegos_parte) ? editando.riegos_parte[0] : editando.riegos_parte) || undefined,
               }}
               textoGuardar={esGestor ? "Guardar y validar" : "Guardar"}
               guardando={guardando}
