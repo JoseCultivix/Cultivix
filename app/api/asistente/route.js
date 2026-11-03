@@ -1,7 +1,7 @@
 // Asistente Cultivix: interpreta lo que dice el agricultor (texto o voz) y
 // devuelve una PROPUESTA estructurada. Nunca guarda nada por sí mismo:
 // el usuario confirma en la app (DEC-051, UX-005).
-import { ahoraEspana, claude, clienteDelUsuario, entradaHerramienta, MODELO, respuestaError, rolEnEmpresa } from "@/lib/servidor";
+import { comprobarLimiteIA, ahoraEspana, claude, clienteDelUsuario, entradaHerramienta, MODELO, respuestaError, rolEnEmpresa } from "@/lib/servidor";
 
 export const maxDuration = 60;
 
@@ -75,6 +75,7 @@ export async function POST(req) {
     const { empresa_id, mensaje, historial = [], recinto_actual_id, canal = "texto" } = await req.json();
     if (!mensaje?.trim()) return Response.json({ error: "Mensaje vacío" }, { status: 400 });
     const rol = await rolEnEmpresa(supabase, user.id, empresa_id);
+    await comprobarLimiteIA(supabase);
     const gestor = ["propietario", "administrador", "encargado"].includes(rol);
 
     // ---- Contexto de la explotación (todo con los permisos del usuario) ----

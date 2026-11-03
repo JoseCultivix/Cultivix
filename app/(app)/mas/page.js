@@ -4,9 +4,10 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import { Pagina } from "@/components/ui";
+import BotonSugerencia from "@/components/BotonSugerencia";
 
 export default function Mas() {
-  const { esGestor, empresas, empresa, cambiarEmpresa, perfil, rol } = useApp();
+  const { esGestor, empresas, empresa, cambiarEmpresa, perfil, rol, esAdminPlataforma } = useApp();
   const router = useRouter();
   const items = [
     ["/partes", "📋", esGestor ? "Partes de trabajo" : "Mis partes", true],
@@ -19,6 +20,7 @@ export default function Mas() {
     ["/economia", "💶", "Economía", esGestor],
     ["/foto", "📷", "Foto de campo", true],
     ["/ajustes", "⚙️", "Ajustes y equipo", true],
+    ["/admin", "📊", "Panel de la beta", esAdminPlataforma],
   ].filter((x) => x[3]);
 
   return (
@@ -30,6 +32,7 @@ export default function Mas() {
             <span className="mt-1 text-[17px] font-extrabold leading-tight text-olivo-900">{t}</span>
           </Link>
         ))}
+        <BotonSugerencia comoEnlace />
       </div>
       {empresas?.length > 1 && (
         <div className="mt-6">
@@ -54,6 +57,9 @@ export default function Mas() {
       >
         Cerrar sesión
       </button>
+      <p className="mt-6 text-center text-sm text-stone-500">
+        <Link href="/privacidad" className="underline">Privacidad</Link> · <Link href="/terminos" className="underline">Condiciones de uso</Link>
+      </p>
     </Pagina>
   );
 }

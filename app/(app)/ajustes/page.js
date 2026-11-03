@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import { Boton, Campo, Etiqueta, Fichas, Hoja, Input, Pagina, Select, Seccion, Tarjeta } from "@/components/ui";
 import { euros, fechaCorta } from "@/lib/formato";
+import TusDatos from "@/components/TusDatos";
 
 const ROLES = [
   ["trabajador", "Trabajador", "Registra sus partes. No ve costes."],
@@ -188,6 +189,8 @@ export default function Ajustes() {
         </Seccion>
       )}
 
+      <TusDatos esAdmin={esAdmin} esPropietario={rol === "propietario"} />
+
       <Hoja abierta={!!hoja} onCerrar={() => setHoja(null)} titulo={{ campana: hoja?.item ? "Editar campaña" : "Nueva campaña", invitar: "Invitar al equipo", trabajador: "Trabajador", labor: "Labor" }[hoja?.tipo]}>
         {hoja?.tipo === "campana" && <FormCampana empresaId={empresaId} item={hoja.item} cultivos={cultivos} campanas={campanas} onHecho={hecho} />}
         {hoja?.tipo === "invitar" && <FormInvitar empresaId={empresaId} trabajadores={trabajadores} onHecho={hecho} />}
@@ -287,9 +290,14 @@ function FormInvitar({ empresaId, trabajadores, onHecho }) {
         ))}
       </div>
       {(rol === "trabajador" || rol === "encargado") && (
+<>
+        <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
+          Antes de invitar a un trabajador, infórmale de que sus partes quedan registrados y de que, si activa el GPS, se usa para saber qué parcelas ha trabajado (art. 90 LOPDGDD). El GPS es siempre opcional.
+        </p>
         <Campo etiqueta="¿Es uno de tus trabajadores?" ayuda="Así sus partes usan su coste/hora.">
           <Select vacio="Crear ficha nueva" opciones={trabajadores.filter((t) => !t.usuario_id).map((t) => ({ value: t.id, label: t.nombre }))} value={trab} onChange={(e) => setTrab(e.target.value)} />
         </Campo>
+        </>
       )}
       <Boton grande className="w-full" disabled={!email.includes("@")} onClick={guardar}>
         Invitar y enviar por WhatsApp

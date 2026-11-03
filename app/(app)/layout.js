@@ -4,6 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useApp } from "@/components/AppProvider";
 import { Cargando } from "@/components/ui";
+import BotonSugerencia from "@/components/BotonSugerencia";
+import AceptarTerminos from "@/components/AceptarTerminos";
+import { VERSION_TERMINOS } from "@/lib/legal";
 
 const NAV = [
   { href: "/", icono: "🏠", texto: "Inicio" },
@@ -14,7 +17,7 @@ const NAV = [
 ];
 
 export default function AppLayout({ children }) {
-  const { sesion, empresas, empresa, esGestor, online, pendientes, errorCarga, cargarEmpresas } = useApp();
+  const { sesion, empresas, empresa, esGestor, online, pendientes, errorCarga, cargarEmpresas, perfil } = useApp();
   const router = useRouter();
   const ruta = usePathname();
 
@@ -36,6 +39,8 @@ export default function AppLayout({ children }) {
     );
   if (!sesion || !empresas || !empresa) return <Cargando texto="Abriendo Cultivix…" />;
 
+  if (perfil && perfil.acepta_terminos_version !== VERSION_TERMINOS && online) return <AceptarTerminos />;
+
   const items = NAV.filter((n) => !n.gestor || esGestor);
   return (
     <>
@@ -45,6 +50,7 @@ export default function AppLayout({ children }) {
         </div>
       )}
       <main>{children}</main>
+      {!["/asistente", "/mapa", "/trabajo"].includes(ruta) && <BotonSugerencia />}
       <nav className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-stone-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
         <ul className={`mx-auto grid max-w-2xl ${items.length === 5 ? "grid-cols-5" : "grid-cols-4"}`}>
           {items.map((n) => {

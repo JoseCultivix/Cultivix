@@ -3,6 +3,8 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
+const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
 const COLORES = { Olivar: "#6f8c41", Pistacho: "#b5a33a", Almendro: "#c27c3e", "Espárrago verde": "#3f9a6b", Viñedo: "#8e3b5a", Cereal: "#d4b44a" };
 
 /** Mapa con ortofoto PNOA (IGN) y tus recintos coloreados por cultivo. */
@@ -44,13 +46,22 @@ export default function MapaLeaflet({ recintos, gps, fotos = [], onSeleccionar }
         style: { color: "#fff", weight: 2, fillColor: COLORES[r.cultivo] || "#e5e7eb", fillOpacity: 0.45 },
       });
       g.on("click", () => onSeleccionar?.(r));
-      g.bindTooltip(`${r.parcela_nombre}${r.n_en_parcela > 1 && r.recinto_sigpac ? " · " + r.recinto_sigpac : ""}`, { direction: "center", className: "!bg-white/90 !font-bold" });
+      g.bindTooltip(esc(`${r.parcela_nombre}${r.n_en_parcela > 1 && r.recinto_sigpac ? " · " + r.recinto_sigpac : ""}`), { direction: "center", className: "!bg-white/90 !font-bold" });
       g.addTo(capa.current);
     }
     for (const f of fotos) {
       if (f.lat == null) continue;
       L.marker([f.lat, f.lon], { icon: L.divIcon({ html: "📷", className: "text-xl", iconSize: [24, 24] }) })
-        .bindPopup(`<img src="${f.url}" style="width:200px;border-radius:8px"/><br/>${f.descripcion || ""}`)
+        .bindPopup(() => {
+          const div = document.createElement("div");
+          const img = document.createElement("img");
+          img.src = f.url || "";
+          img.style.cssText = "width:200px;border-radius:8px";
+          const p = document.createElement("p");
+          p.textContent = f.descripcion || "";
+          div.append(img, p);
+          return div;
+        })
         .addTo(capa.current);
     }
     const b = capa.current.getBounds();

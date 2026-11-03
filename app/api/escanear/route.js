@@ -1,6 +1,6 @@
 // Lectura de albaranes/facturas/tickets con IA (OCR + interpretación).
 // Devuelve una propuesta; el usuario la revisa antes de guardar (FLUJO-021/022/027).
-import { claude, clienteDelUsuario, entradaHerramienta, MODELO, respuestaError, rolEnEmpresa } from "@/lib/servidor";
+import { comprobarLimiteIA, claude, clienteDelUsuario, entradaHerramienta, MODELO, respuestaError, rolEnEmpresa } from "@/lib/servidor";
 
 export const maxDuration = 60;
 
@@ -69,6 +69,7 @@ export async function POST(req) {
     const { supabase, user } = await clienteDelUsuario(req);
     const { empresa_id, base64, media_type, tipo } = await req.json();
     const rol = await rolEnEmpresa(supabase, user.id, empresa_id);
+    await comprobarLimiteIA(supabase);
     if (!base64) return Response.json({ error: "Falta la imagen" }, { status: 400 });
 
     if (tipo === "cosecha") {

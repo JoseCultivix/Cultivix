@@ -20,6 +20,7 @@ export default function AppProvider({ children }) {
   const [pendientes, setPendientes] = useState(0);
   const [aviso, setAviso] = useState(null);
   const [errorCarga, setErrorCarga] = useState(null);
+  const [esAdminPlataforma, setEsAdminPlataforma] = useState(false);
   const avisoTimer = useRef(null);
 
   const notificar = useCallback((texto, tipo = "ok") => {
@@ -52,6 +53,8 @@ export default function AppProvider({ children }) {
     try {
       setErrorCarga(null);
       await supabase.rpc("aceptar_invitaciones");
+      supabase.rpc("registrar_acceso").then(() => {});
+      supabase.rpc("es_admin_plataforma").then(({ data }) => setEsAdminPlataforma(!!data));
       const [{ data: p }, { data: eu, error }] = await Promise.all([
         supabase.from("usuarios").select("*").eq("id", uid).maybeSingle(),
         supabase.from("empresa_usuarios").select("rol, empresa_id, empresas(id, nombre)").eq("usuario_id", uid).eq("activo", true),
@@ -216,6 +219,7 @@ export default function AppProvider({ children }) {
     cambiarEmpresa,
     cargarEmpresas,
     errorCarga,
+    esAdminPlataforma,
     ...cat,
     recargar,
     gps,
