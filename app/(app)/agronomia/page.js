@@ -1,5 +1,5 @@
 "use client";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiPost, supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
@@ -67,10 +67,40 @@ function AgronomIA() {
   const inputFoto = useRef(null);
   const voz = useVoz({ onFinal: (t) => setTexto((x) => (x ? x + " " : "") + t) });
 
+  // La conversación se guarda en el móvil para poder seguirla al volver
+  const clave = `cultivix.agronomia.${empresaId}`;
+  const cargada = useRef(false);
   useEffect(() => {
+    try {
+      const g = JSON.parse(localStorage.getItem(clave) || "null");
+      if (g?.msgs?.length) setMsgs(g.msgs);
+    } catch {}
+    cargada.current = true;
     const inicial = q.get("q");
     if (inicial) setTexto(inicial);
-  }, []); // eslint-disable-line
+  }, [clave]); // eslint-disable-line
+  useLayoutEffect(() => {
+    if (!cargada.current) return;
+    try {
+      const limpios = msgs.filter((m) => !m.error).slice(-30).map(({ foto, ...m }) => ({ ...m, conFoto: !!foto || m.conFoto }));
+      localStorage.setItem(clave, JSON.stringify({ msgs: limpios }));
+    } catch {}
+  }, [msgs, clave]);
+
+  function nuevaConsulta() {
+    setMsgs([]);
+    setTexto("");
+    setFoto(null);
+  }
+
+  function continuar(h) {
+    setMsgs([
+      { rol: "usuario", texto: h.pregunta },
+      { rol: "asistente", texto: h.respuesta, id: h.id },
+    ]);
+    setHistorial(null);
+    setTimeout(() => document.getElementById("pregunta-agro")?.focus(), 200);
+  }
   useEffect(() => {
     fin.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, pensando]);
@@ -91,7 +121,7 @@ function AgronomIA() {
     const m = (t ?? texto).trim();
     if ((!m && !foto) || pensando) return;
     if (!online) return notificar("AgronomIA necesita conexión a internet", "error");
-    const hist = msgs.map((x) => ({ rol: x.rol, texto: x.texto }));
+    const hist = msgs.filter((x) => !x.error).map((x) => ({ rol: x.rol, texto: x.texto }));
     const f = foto;
     setTexto("");
     setFoto(null);
@@ -125,9 +155,16 @@ function AgronomIA() {
       <div className="flex-1 overflow-y-auto px-4 pt-5 pb-4">
         <div className="mb-3 flex items-center justify-between">
           <h1 className="text-2xl font-black text-olivo-900">🌿 AgronomIA</h1>
-          <button type="button" onClick={verHistorial} className="text-sm font-bold text-olivo-700">
-            Consultas anteriores
-          </button>
+          <div className="flex gap-3">
+            {msgs.length > 0 && (
+              <button type="button" onClick={nuevaConsulta} className="text-sm font-bold text-tierra-700">
+                + Nueva
+              </button>
+            )}
+            <button type="button" onClick={verHistorial} className="text-sm font-bold text-olivo-700">
+              Anteriores
+            </button>
+          </div>
         </div>
         {msgs.length === 0 && (
           <div>
@@ -149,6 +186,7 @@ function AgronomIA() {
             m.rol === "usuario" ? (
               <div key={i} className="ml-10 rounded-2xl bg-olivo-700 px-4 py-3 text-white">
                 {m.foto && <img src={m.foto} alt="Foto enviada" className="mb-2 max-h-48 rounded-xl" />}
+                {!m.foto && m.conFoto && <p className="mb-1 text-xs opacity-80">📷 con foto</p>}
                 {m.texto}
               </div>
             ) : (
@@ -212,7 +250,7 @@ function AgronomIA() {
               🎤
             </button>
           )}
-          <input value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Pregunta lo que quieras…" className="h-14 min-w-0 flex-1 rounded-full border-2 border-stone-200 bg-white px-4 text-[17px] outline-none focus:border-olivo-500" />
+          <input id="pregunta-agro" value={texto} onChange={(e) => setTexto(e.target.value)} placeholder={msgs.length ? "Sigue preguntando…" : "Pregunta lo que quieras…"} className="h-14 min-w-0 flex-1 rounded-full border-2 border-stone-200 bg-white px-4 text-[17px] outline-none focus:border-olivo-500" />
           <button type="submit" disabled={(!texto.trim() && !foto) || pensando} className="h-14 w-12 shrink-0 rounded-full bg-tierra-600 text-2xl text-white disabled:opacity-40" aria-label="Enviar">
             ➤
           </button>
@@ -230,6 +268,9 @@ function AgronomIA() {
               <div className="mt-2">
                 <Texto t={h.respuesta} />
               </div>
+              <button type="button" onClick={() => continuar(h)} className="mt-3 w-full rounded-xl bg-olivo-700 py-2.5 font-bold text-white">
+                Seguir con esta consulta
+              </button>
             </details>
           ))}
         </div>
