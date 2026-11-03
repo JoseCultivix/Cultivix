@@ -470,3 +470,20 @@ begin
 end $$;
 revoke execute on function fito_finalizar_carga(text, integer[]) from public, anon, authenticated;
 do $$ begin grant execute on function fito_finalizar_carga(text, integer[]) to service_role; exception when undefined_object then null; end $$;
+
+-- 8. Carga por partes: cada uso lleva su nº de orden en la exportación
+alter table fito_usos add column if not exists orden integer;
+create unique index if not exists ux_fito_usos_lote_orden on fito_usos(lote, orden);
+
+-- 9. Actualización semanal (sábados, 07:17 UTC; el MAPA actualiza los viernes)
+do $$ begin
+  if exists (select 1 from pg_available_extensions where name = 'pg_cron') and exists (select 1 from pg_available_extensions where name = 'pg_net') then
+    create extension if not exists pg_net;
+    create extension if not exists pg_cron;
+    perform cron.unschedule(jobid) from cron.job where jobname = 'actualizar-fitos';
+    perform cron.schedule('actualizar-fitos', '17 7 * * 6',
+      $c$select net.http_post(url := 'https://luptzilwztijtqaacong.supabase.co/functions/v1/actualizar-fitos',
+                             headers := '{"Content-Type":"application/json"}'::jsonb, body := '{}'::jsonb,
+                             timeout_milliseconds := 300000)$c$);
+  end if;
+end $$;
