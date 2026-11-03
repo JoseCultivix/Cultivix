@@ -1,6 +1,7 @@
 "use client";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { useNavegar } from "@/lib/navegacion";
 import { apiPost, supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import ParteEditor from "@/components/ParteEditor";
@@ -24,6 +25,7 @@ function Asistente() {
   const { empresaId, deteccion, labores, recintos, maquinaria, aperos, productos, esGestor, gps, notificar, recargar, online } = app;
   const q = useSearchParams();
   const router = useRouter();
+  const navegar = useNavegar();
   const [msgs, setMsgs] = useState([]);
   const [texto, setTexto] = useState("");
   const [pensando, setPensando] = useState(false);
@@ -136,7 +138,7 @@ function Asistente() {
         guardarTrabajoEnCurso({ ...payload, recorrido: gps ? [[gps.lon, gps.lat, Date.now()]] : [] });
         await cerrarAccion(p, payloadEditado ? "modificada" : "confirmada", { tabla: "partes_trabajo", id: r.id });
         marcar(i, "guardado");
-        router.push("/trabajo");
+        navegar("/trabajo");
         return;
       }
       const r = await guardarParte({ ...base, empresa_id: empresaId, estado: esGestor ? "validado" : "pendiente", origen: "voz" });

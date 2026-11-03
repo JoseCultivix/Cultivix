@@ -7,6 +7,7 @@ import { Cargando } from "@/components/ui";
 import BotonSugerencia from "@/components/BotonSugerencia";
 import AceptarTerminos from "@/components/AceptarTerminos";
 import { VERSION_TERMINOS } from "@/lib/legal";
+import { NavegacionMovil } from "@/lib/navegacion";
 
 const NAV = [
   { href: "/", icono: "🏠", texto: "Inicio" },
@@ -49,6 +50,7 @@ export default function AppLayout({ children }) {
           {!online ? "Sin cobertura · lo que registres se guardará en el móvil" : `Enviando ${pendientes} registro(s) pendiente(s)…`}
         </div>
       )}
+      <NavegacionMovil />
       <main>{children}</main>
       {!["/asistente", "/agronomia", "/mapa", "/trabajo"].includes(ruta) && <BotonSugerencia />}
       <nav className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-stone-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">

@@ -1,6 +1,7 @@
 "use client";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useNavegar } from "@/lib/navegacion";
 import { useApp } from "@/components/AppProvider";
 import ParteEditor, { habitualesDe } from "@/components/ParteEditor";
 import { Boton, Pagina, Tarjeta } from "@/components/ui";
@@ -20,6 +21,7 @@ function Trabajo() {
   const app = useApp();
   const { labores, recintos, esGestor, gps, deteccion, notificar, actualizarGps } = app;
   const router = useRouter();
+  const navegar = useNavegar();
   const q = useSearchParams();
   const [enCurso, setEnCurso] = useState(null);
   const [modo, setModo] = useState(q.get("modo") === "hecho" ? "completo" : "iniciar");
@@ -115,7 +117,7 @@ function Trabajo() {
       guardarTrabajoEnCurso(null);
       setCerrando(false);
       notificar(r.enCola ? "Guardado en el móvil. Se enviará al tener cobertura." : esGestor ? "Trabajo guardado ✓" : "Enviado al encargado para validar ✓");
-      router.push("/");
+      navegar("/");
     } catch (e) {
       notificar(e.message, "error");
     } finally {
@@ -134,7 +136,7 @@ function Trabajo() {
         gps_inicio: gps,
       });
       notificar(r.enCola ? "Guardado en el móvil. Se enviará al tener cobertura." : "Trabajo guardado ✓");
-      router.push("/");
+      navegar("/");
     } catch (e) {
       notificar(e.message, "error");
     } finally {

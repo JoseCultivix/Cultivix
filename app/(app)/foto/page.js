@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useNavegar } from "@/lib/navegacion";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import { comprimirImagen } from "@/lib/imagen";
@@ -13,6 +14,7 @@ const TIPOS = ["Seguimiento", "Plaga", "Enfermedad", "Daño (helada, granizo…)
 export default function Foto() {
   const { empresaId, recintos, actualizarGps, notificar } = useApp();
   const router = useRouter();
+  const navegar = useNavegar();
   const input = useRef(null);
   const [foto, setFoto] = useState(null);
   const [vista, setVista] = useState(null);
@@ -60,7 +62,7 @@ export default function Foto() {
         });
       }
       notificar("Foto guardada ✓");
-      router.push("/");
+      navegar("/");
     } catch (e) {
       notificar("No se pudo subir la foto: " + e.message, "error");
     } finally {

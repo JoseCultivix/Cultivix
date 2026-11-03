@@ -1,5 +1,7 @@
 "use client";
+import { useEffect, useRef } from "react";
 import Link from "next/link";
+import { abrirEntradaHoja, cerrarEntradaHoja } from "@/lib/navegacion";
 
 export function Pagina({ titulo, subtitulo, accion, children, volver }) {
   return (
@@ -144,6 +146,22 @@ export function Vacio({ icono = "🌱", titulo, texto, children }) {
 
 /** Hoja inferior (modal) cómoda para el pulgar */
 export function Hoja({ abierta, onCerrar, titulo, children }) {
+  const cb = useRef(onCerrar);
+  cb.current = onCerrar;
+  useEffect(() => {
+    if (!abierta) return;
+    abrirEntradaHoja();
+    let porAtras = false;
+    const alVolver = () => {
+      porAtras = true;
+      cb.current?.();
+    };
+    window.addEventListener("popstate", alVolver);
+    return () => {
+      window.removeEventListener("popstate", alVolver);
+      if (!porAtras) cerrarEntradaHoja();
+    };
+  }, [abierta]);
   if (!abierta) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onCerrar}>

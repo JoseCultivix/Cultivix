@@ -1,6 +1,7 @@
 "use client";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useNavegar } from "@/lib/navegacion";
 import { apiPost, supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import { blobABase64, comprimirImagen } from "@/lib/imagen";
@@ -13,6 +14,7 @@ const UNIDADES = ["kg", "l", "ud", "t", "g", "ml"].map((t) => ({ value: t, label
 export default function Escanear() {
   const { empresaId, productos, notificar, recargar, esGestor } = useApp();
   const router = useRouter();
+  const navegar = useNavegar();
   const camara = useRef(null);
   const archivo = useRef(null);
   const [vista, setVista] = useState(null);
@@ -89,7 +91,7 @@ export default function Escanear() {
       if (error) throw error;
       await recargar();
       notificar("Compra registrada. Stock actualizado ✓");
-      router.push("/productos");
+      navegar("/productos");
     } catch (e) {
       notificar(e.message, "error");
     } finally {
