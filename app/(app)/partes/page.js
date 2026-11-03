@@ -28,7 +28,7 @@ export default function Partes() {
     let q = supabase
       .from("partes_trabajo")
       .select(
-        "*, partes_trabajo_recintos(recinto_id), partes_trabajo_trabajadores(trabajador_id, horas), partes_trabajo_maquinaria(maquinaria_id), partes_trabajo_aperos(apero_id), aplicaciones(tipo, plaga_o_motivo, aplicaciones_productos(producto_id, dosis_ha, unidad_dosis))"
+        "*, partes_trabajo_recintos(recinto_id), partes_trabajo_trabajadores(trabajador_id, horas), partes_trabajo_maquinaria(maquinaria_id), partes_trabajo_aperos(apero_id), aplicaciones(tipo, plaga_o_motivo, metodo_aplicacion, justificacion, aplicaciones_productos(producto_id, dosis_ha, unidad_dosis))"
       )
       .eq("empresa_id", empresaId)
       .order("fecha", { ascending: false })
@@ -160,7 +160,7 @@ export default function Partes() {
                 maquinaria_ids: editando.partes_trabajo_maquinaria.map((x) => x.maquinaria_id),
                 apero_ids: editando.partes_trabajo_aperos.map((x) => x.apero_id),
                 aplicacion: editando.aplicaciones?.[0]
-                  ? { plaga_o_motivo: editando.aplicaciones[0].plaga_o_motivo, productos: editando.aplicaciones[0].aplicaciones_productos }
+                  ? { plaga_o_motivo: editando.aplicaciones[0].plaga_o_motivo, metodo_aplicacion: editando.aplicaciones[0].metodo_aplicacion, justificacion: editando.aplicaciones[0].justificacion, productos: editando.aplicaciones[0].aplicaciones_productos }
                   : undefined,
               }}
               textoGuardar={esGestor ? "Guardar y validar" : "Guardar"}

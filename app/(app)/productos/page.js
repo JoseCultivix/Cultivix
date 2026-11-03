@@ -53,6 +53,7 @@ export default function Productos() {
                   <p className="text-sm text-stone-500">
                     <span className="capitalize">{p.tipo}</span>
                     {p.materia_activa ? ` · ${p.materia_activa}` : ""}
+                    {p.riqueza_n != null || p.riqueza_p2o5 != null || p.riqueza_k2o != null ? ` · ${num(p.riqueza_n ?? 0, 1)}-${num(p.riqueza_p2o5 ?? 0, 1)}-${num(p.riqueza_k2o ?? 0, 1)}` : ""}
                     {p.ultima_compra ? ` · comprado ${fechaCorta(p.ultima_compra)}` : ""}
                     {p.precio_medio ? ` · ${euros(p.precio_medio)}/${p.unidad}` : ""}
                   </p>
@@ -81,7 +82,7 @@ export default function Productos() {
 }
 
 function FormProducto({ p, empresaId, onHecho }) {
-  const [f, setF] = useState({ nombre: "", tipo: "fitosanitario", unidad: "kg", materia_activa: "", numero_registro: "", dosis_habitual_ha: "", plazo_seguridad_dias: "", ...p });
+  const [f, setF] = useState({ nombre: "", tipo: "fitosanitario", unidad: "kg", materia_activa: "", numero_registro: "", dosis_habitual_ha: "", plazo_seguridad_dias: "", riqueza_n: "", riqueza_p2o5: "", riqueza_k2o: "", densidad_kg_l: "", n_organico: false, ...p });
   const [ajuste, setAjuste] = useState("");
   const c = (k) => ({ value: f[k] ?? "", onChange: (e) => setF({ ...f, [k]: e.target.value }) });
   const n = (x) => (x === "" || x == null ? null : Number(String(x).replace(",", ".")));
@@ -96,6 +97,11 @@ function FormProducto({ p, empresaId, onHecho }) {
       numero_registro: f.numero_registro || null,
       dosis_habitual_ha: n(f.dosis_habitual_ha),
       plazo_seguridad_dias: n(f.plazo_seguridad_dias),
+      riqueza_n: n(f.riqueza_n),
+      riqueza_p2o5: n(f.riqueza_p2o5),
+      riqueza_k2o: n(f.riqueza_k2o),
+      densidad_kg_l: n(f.densidad_kg_l),
+      n_organico: !!f.n_organico,
     };
     const { error } = p.id ? await supabase.from("productos").update(datos).eq("id", p.id) : await supabase.from("productos").insert(datos);
     if (error) return alert(error.message);
@@ -130,6 +136,32 @@ function FormProducto({ p, empresaId, onHecho }) {
           <Input inputMode="numeric" {...c("plazo_seguridad_dias")} />
         </Campo>
       </div>
+      {(["fertilizante", "bioestimulante", "otro"].includes(f.tipo) || n(f.riqueza_n) != null) && (
+        <div className="rounded-2xl bg-olivo-50 p-3">
+          <p className="text-sm font-bold text-olivo-800">Riqueza del abono (% en peso)</p>
+          <p className="mb-2 text-xs text-stone-600">Viene en el saco o la etiqueta (ej. 15-15-15). Sirve para calcular los kg de N, P y K por hectárea.</p>
+          <div className="grid grid-cols-3 gap-2">
+            <Campo etiqueta="N">
+              <Input inputMode="decimal" {...c("riqueza_n")} />
+            </Campo>
+            <Campo etiqueta="P₂O₅">
+              <Input inputMode="decimal" {...c("riqueza_p2o5")} />
+            </Campo>
+            <Campo etiqueta="K₂O">
+              <Input inputMode="decimal" {...c("riqueza_k2o")} />
+            </Campo>
+          </div>
+          {f.unidad === "l" && (
+            <Campo etiqueta="Densidad (kg/l)" ayuda="Para pasar litros a kilos. Si no la sabes, se usa 1." className="mt-2">
+              <Input inputMode="decimal" {...c("densidad_kg_l")} />
+            </Campo>
+          )}
+          <label className="mt-2 flex items-center gap-2 text-sm font-semibold">
+            <input type="checkbox" className="h-5 w-5" checked={!!f.n_organico} onChange={(e) => setF({ ...f, n_organico: e.target.checked })} />
+            Es orgánico (estiércol, purín, compost…)
+          </label>
+        </div>
+      )}
       {p.id && (
         <Campo etiqueta={`Ajustar stock (+/− ${f.unidad})`} ayuda={`Stock actual: ${num(p.stock ?? 0, 2)} ${f.unidad}. Usa negativo para bajas (roturas, caducado).`}>
           <Input inputMode="decimal" value={ajuste} onChange={(e) => setAjuste(e.target.value)} placeholder="0" />
@@ -139,6 +171,7 @@ function FormProducto({ p, empresaId, onHecho }) {
         Guardar
       </Boton>
       {f.tipo === "fitosanitario" && !f.numero_registro && <Etiqueta color="ambar">El nº de registro es necesario para el cuaderno de campo</Etiqueta>}
+      {f.tipo === "fertilizante" && n(f.riqueza_n) == null && n(f.riqueza_p2o5) == null && n(f.riqueza_k2o) == null && <Etiqueta color="ambar">Indica la riqueza para el control de fertilización</Etiqueta>}
     </div>
   );
 }

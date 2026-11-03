@@ -40,7 +40,7 @@ export default function Privacidad() {
           <b>Fotos y documentos</b> que subes (albaranes, tickets de cosecha, fotos de campo, documentación de maquinaria).
         </li>
         <li>
-          <b>Lo que escribes o dictas al asistente</b> y las propuestas que te hace.
+          <b>Lo que escribes o dictas al asistente y a AgronomIA</b> (incluidas las fotos de cultivos que le envíes), sus propuestas y respuestas.
         </li>
         <li>
           <b>Sugerencias</b> que envías desde la app y datos técnicos mínimos (fecha de último acceso, tipo de dispositivo).
@@ -97,7 +97,7 @@ export default function Privacidad() {
           </tr>
           <tr>
             <td>Anthropic (Claude)</td>
-            <td>Interpretar lo que dices al asistente y leer fotos de albaranes y tickets, solo cuando usas esas funciones</td>
+            <td>Interpretar lo que dices al asistente, responder a tus consultas de AgronomIA (con datos agronómicos de tu explotación, nunca económicos) y leer fotos de albaranes, tickets y cultivos, solo cuando usas esas funciones</td>
             <td>EE. UU.</td>
           </tr>
         </tbody>

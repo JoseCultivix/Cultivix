@@ -124,7 +124,7 @@ function FormEquipo({ tipo, item, empresaId, onHecho }) {
   const tabla = tipo === "maquina" ? "maquinaria" : "aperos";
   async function guardar() {
     const datos = { empresa_id: empresaId, nombre: f.nombre, tipo: f.tipo || null, marca: f.marca || null, modelo: f.modelo || null, coste_hora: Number(String(f.coste_hora || 0).replace(",", ".")) };
-    if (tipo === "maquina") Object.assign(datos, { matricula: f.matricula || null, numero_roma: f.numero_roma || null });
+    if (tipo === "maquina") Object.assign(datos, { matricula: f.matricula || null, numero_roma: f.numero_roma || null, fecha_ultima_inspeccion: f.fecha_ultima_inspeccion || null });
     const { error } = item ? await supabase.from(tabla).update(datos).eq("id", item.id) : await supabase.from(tabla).insert(datos);
     if (error) return alert(error.message);
     onHecho("Guardado ✓");
@@ -154,6 +154,9 @@ function FormEquipo({ tipo, item, empresaId, onHecho }) {
             </Campo>
             <Campo etiqueta="Nº ROMA">
               <Input {...c("numero_roma")} />
+            </Campo>
+            <Campo etiqueta="Última inspección (ITEAF)" ayuda="Equipos de tratamiento" className="col-span-2">
+              <Input type="date" {...c("fecha_ultima_inspeccion")} />
             </Campo>
           </>
         )}

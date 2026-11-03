@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import { Boton, Cargando, Pagina, Vacio } from "@/components/ui";
@@ -70,6 +71,18 @@ export default function Cuaderno() {
         )
       }
     >
+      <div className="no-print mb-4 grid grid-cols-2 gap-2">
+        <Link href="/cuaderno/oficial" className="rounded-2xl bg-olivo-700 p-3 text-white shadow-sm">
+          <span className="text-2xl">🏛️</span>
+          <span className="block font-extrabold leading-tight">Cuaderno oficial</span>
+          <span className="block text-xs opacity-90">PDF y Excel por comunidad · SIEX</span>
+        </Link>
+        <Link href="/fertilizacion" className="rounded-2xl bg-white p-3 shadow-sm">
+          <span className="text-2xl">🌾</span>
+          <span className="block font-extrabold leading-tight text-olivo-900">Fertilización</span>
+          <span className="block text-xs text-stone-500">Aplicado vs. máximo por parcela</span>
+        </Link>
+      </div>
       <SelectorCampana valor={sel} onCambio={setSel} />
       <p className="no-print mb-4 text-[15px] text-stone-600">Se rellena solo con los tratamientos y abonados que registras. No tienes que escribir nada aquí.</p>
       {(pendientes > 0 || sinRegistro.length > 0) && (

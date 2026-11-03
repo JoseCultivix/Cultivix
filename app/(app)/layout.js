@@ -50,7 +50,7 @@ export default function AppLayout({ children }) {
         </div>
       )}
       <main>{children}</main>
-      {!["/asistente", "/mapa", "/trabajo"].includes(ruta) && <BotonSugerencia />}
+      {!["/asistente", "/agronomia", "/mapa", "/trabajo"].includes(ruta) && <BotonSugerencia />}
       <nav className="no-print fixed inset-x-0 bottom-0 z-40 border-t border-stone-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
         <ul className={`mx-auto grid max-w-2xl ${items.length === 5 ? "grid-cols-5" : "grid-cols-4"}`}>
           {items.map((n) => {

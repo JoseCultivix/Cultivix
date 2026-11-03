@@ -5,6 +5,7 @@ import { useApp } from "@/components/AppProvider";
 import { Boton, Campo, Etiqueta, Fichas, Hoja, Input, Pagina, Select, Seccion, Tarjeta } from "@/components/ui";
 import { euros, fechaCorta } from "@/lib/formato";
 import TusDatos from "@/components/TusDatos";
+import { CCAA, CARNES } from "@/lib/ccaa";
 
 const ROLES = [
   ["trabajador", "Trabajador", "Registra sus partes. No ve costes."],
@@ -20,16 +21,19 @@ export default function Ajustes() {
   const esAdmin = ["propietario", "administrador"].includes(rol);
   const [emp, setEmp] = useState(null);
   const [miembros, setMiembros] = useState([]);
+  const [asesores, setAsesores] = useState([]);
   const [invit, setInvit] = useState([]);
   const [hoja, setHoja] = useState(null);
   const [nombre, setNombre] = useState(perfil?.nombre || "");
 
   async function cargar() {
-    const [e, m, i] = await Promise.all([
+    const [e, m, i, a] = await Promise.all([
       supabase.from("empresas").select("*").eq("id", empresaId).single(),
       supabase.from("empresa_usuarios").select("id, rol, usuario_id, usuarios(nombre, email)").eq("empresa_id", empresaId),
       esAdmin ? supabase.from("invitaciones").select("*").eq("empresa_id", empresaId).eq("aceptada", false) : Promise.resolve({ data: [] }),
+      supabase.from("asesores").select("*").eq("empresa_id", empresaId).eq("activo", true).order("nombre"),
     ]);
+    setAsesores(a.data || []);
     setEmp(e.data);
     setMiembros(m.data || []);
     setInvit(i.data || []);
@@ -39,8 +43,11 @@ export default function Ajustes() {
   }, [empresaId]); // eslint-disable-line
 
   async function guardarEmpresa() {
-    const { nombre, nif, direccion, municipio, provincia, telefono, email, regimen_fiscal, iva_es_coste } = emp;
-    const { error } = await supabase.from("empresas").update({ nombre, nif, direccion, municipio, provincia, telefono, email, regimen_fiscal: regimen_fiscal || null, iva_es_coste }).eq("id", empresaId);
+    const { nombre, nif, direccion, municipio, provincia, telefono, email, regimen_fiscal, iva_es_coste, comunidad_autonoma, codigo_rea } = emp;
+    const { error } = await supabase
+      .from("empresas")
+      .update({ nombre, nif, direccion, municipio, provincia, telefono, email, regimen_fiscal: regimen_fiscal || null, iva_es_coste, comunidad_autonoma: comunidad_autonoma || null, codigo_rea: codigo_rea || null })
+      .eq("id", empresaId);
     if (error) return notificar(error.message, "error");
     await cargarEmpresas();
     notificar("Empresa guardada ✓");
@@ -89,6 +96,12 @@ export default function Ajustes() {
             </Campo>
             <Campo etiqueta="Provincia">
               <Input {...c("provincia")} />
+            </Campo>
+            <Campo etiqueta="Comunidad autónoma" ayuda="Para el cuaderno oficial">
+              <Select opciones={CCAA.map((x) => ({ value: x.nombre, label: x.nombre }))} {...c("comunidad_autonoma")} />
+            </Campo>
+            <Campo etiqueta="Código REA / SIEX" ayuda="Nº de registro de la explotación">
+              <Input {...c("codigo_rea")} />
             </Campo>
             <Campo etiqueta="Régimen fiscal">
               <Select opciones={[{ value: "modulos", label: "Módulos" }, { value: "estimacion_directa", label: "Estimación directa" }]} {...c("regimen_fiscal")} />
@@ -172,6 +185,27 @@ export default function Ajustes() {
       )}
 
       {esGestor && (
+        <Seccion titulo="Asesores (fitosanitarios y abonado)" accion={<button type="button" className="text-sm font-bold text-olivo-700" onClick={() => setHoja({ tipo: "asesor" })}>+ Añadir</button>}>
+          <p className="mb-2 text-sm text-stone-500">El técnico que te asesora en gestión de plagas o en fertilización. Sale en el cuaderno oficial.</p>
+          <div className="space-y-2">
+            {asesores.map((a) => (
+              <button key={a.id} type="button" onClick={() => setHoja({ tipo: "asesor", item: a })} className="flex w-full justify-between rounded-2xl bg-white p-3 text-left shadow-sm">
+                <span>
+                  <b>{a.nombre}</b>
+                  <span className="block text-sm text-stone-500">
+                    {a.numero_ropo ? `ROPO ${a.numero_ropo}` : "Sin nº ROPO"}
+                    {a.entidad ? ` · ${a.entidad}` : ""}
+                  </span>
+                </span>
+                <Etiqueta color="tierra">{{ fitosanitarios: "Fitosanitarios", fertilizacion: "Abonado", ambos: "Fitos + abonado" }[a.ambito]}</Etiqueta>
+              </button>
+            ))}
+            {!asesores.length && <p className="text-stone-500">Sin asesor registrado.</p>}
+          </div>
+        </Seccion>
+      )}
+
+      {esGestor && (
         <Seccion titulo="Labores" accion={<button type="button" className="text-sm font-bold text-olivo-700" onClick={() => setHoja({ tipo: "labor" })}>+ Añadir</button>}>
           <div className="space-y-2">
             {labores.map((l) => (
@@ -191,7 +225,8 @@ export default function Ajustes() {
 
       <TusDatos esAdmin={esAdmin} esPropietario={rol === "propietario"} />
 
-      <Hoja abierta={!!hoja} onCerrar={() => setHoja(null)} titulo={{ campana: hoja?.item ? "Editar campaña" : "Nueva campaña", invitar: "Invitar al equipo", trabajador: "Trabajador", labor: "Labor" }[hoja?.tipo]}>
+      <Hoja abierta={!!hoja} onCerrar={() => setHoja(null)} titulo={{ campana: hoja?.item ? "Editar campaña" : "Nueva campaña", invitar: "Invitar al equipo", trabajador: "Trabajador", labor: "Labor", asesor: "Asesor" }[hoja?.tipo]}>
+        {hoja?.tipo === "asesor" && <FormAsesor empresaId={empresaId} item={hoja.item} onHecho={hecho} />}
         {hoja?.tipo === "campana" && <FormCampana empresaId={empresaId} item={hoja.item} cultivos={cultivos} campanas={campanas} onHecho={hecho} />}
         {hoja?.tipo === "invitar" && <FormInvitar empresaId={empresaId} trabajadores={trabajadores} onHecho={hecho} />}
         {hoja?.tipo === "trabajador" && <FormTrabajador empresaId={empresaId} item={hoja.item} onHecho={hecho} />}
@@ -307,10 +342,10 @@ function FormInvitar({ empresaId, trabajadores, onHecho }) {
 }
 
 function FormTrabajador({ empresaId, item, onHecho }) {
-  const [f, setF] = useState(item || { nombre: "", apellidos: "", telefono: "", tipo_trabajador: "fijo", coste_hora: "" });
+  const [f, setF] = useState(item || { nombre: "", apellidos: "", telefono: "", tipo_trabajador: "fijo", coste_hora: "", numero_ropo: "", tipo_carne: "" });
   const c = (k) => ({ value: f[k] ?? "", onChange: (e) => setF({ ...f, [k]: e.target.value }) });
   async function guardar() {
-    const datos = { empresa_id: empresaId, nombre: f.nombre, apellidos: f.apellidos || null, telefono: f.telefono || null, tipo_trabajador: f.tipo_trabajador, coste_hora: Number(String(f.coste_hora || 0).replace(",", ".")) };
+    const datos = { empresa_id: empresaId, nombre: f.nombre, apellidos: f.apellidos || null, telefono: f.telefono || null, tipo_trabajador: f.tipo_trabajador, coste_hora: Number(String(f.coste_hora || 0).replace(",", ".")), numero_ropo: f.numero_ropo || null, tipo_carne: f.tipo_carne || null };
     const { error } = item ? await supabase.from("trabajadores").update(datos).eq("id", item.id) : await supabase.from("trabajadores").insert(datos);
     if (error) return alert(error.message);
     onHecho("Guardado ✓");
@@ -332,6 +367,15 @@ function FormTrabajador({ empresaId, item, onHecho }) {
         </Campo>
       </div>
       <Fichas opciones={["propietario", "fijo", "eventual", "autonomo"].map((v) => ({ value: v, label: v }))} valor={f.tipo_trabajador} onCambio={(v) => setF({ ...f, tipo_trabajador: v || "fijo" })} />
+      <div className="rounded-2xl bg-tierra-50 p-3">
+        <p className="mb-2 text-sm font-bold text-tierra-700">Si aplica fitosanitarios (sale en el cuaderno)</p>
+        <Campo etiqueta="Nº inscripción ROPO / carné">
+          <Input {...c("numero_ropo")} />
+        </Campo>
+        <div className="mt-2">
+          <Fichas opciones={Object.entries(CARNES).map(([value, label]) => ({ value, label }))} valor={f.tipo_carne} onCambio={(v) => setF({ ...f, tipo_carne: v || "" })} />
+        </div>
+      </div>
       <Boton grande className="w-full" disabled={!f.nombre} onClick={guardar}>
         Guardar
       </Boton>
@@ -392,6 +436,65 @@ function FormLabor({ empresaId, item, maquinaria, aperos, onHecho }) {
       <Boton grande className="w-full" disabled={!f.nombre} onClick={guardar}>
         Guardar
       </Boton>
+    </div>
+  );
+}
+
+function FormAsesor({ empresaId, item, onHecho }) {
+  const [f, setF] = useState(item || { nombre: "", nif: "", numero_ropo: "", ambito: "ambos", entidad: "", telefono: "", email: "" });
+  const c = (k) => ({ value: f[k] ?? "", onChange: (e) => setF({ ...f, [k]: e.target.value }) });
+  async function guardar() {
+    const datos = { empresa_id: empresaId, nombre: f.nombre.trim(), nif: f.nif || null, numero_ropo: f.numero_ropo || null, ambito: f.ambito, entidad: f.entidad || null, telefono: f.telefono || null, email: f.email || null };
+    const { error } = item ? await supabase.from("asesores").update(datos).eq("id", item.id) : await supabase.from("asesores").insert(datos);
+    if (error) return alert(error.message);
+    onHecho("Asesor guardado ✓");
+  }
+  return (
+    <div className="space-y-3">
+      <Campo etiqueta="Nombre y apellidos">
+        <Input {...c("nombre")} />
+      </Campo>
+      <div className="grid grid-cols-2 gap-2">
+        <Campo etiqueta="NIF">
+          <Input {...c("nif")} />
+        </Campo>
+        <Campo etiqueta="Nº inscripción ROPO">
+          <Input {...c("numero_ropo")} />
+        </Campo>
+        <Campo etiqueta="Teléfono">
+          <Input {...c("telefono")} inputMode="tel" />
+        </Campo>
+        <Campo etiqueta="Email">
+          <Input {...c("email")} inputMode="email" />
+        </Campo>
+      </div>
+      <Campo etiqueta="Entidad (agrupación, ATRIA, cooperativa…)">
+        <Input {...c("entidad")} />
+      </Campo>
+      <Fichas
+        opciones={[
+          { value: "fitosanitarios", label: "Fitosanitarios (GIP)" },
+          { value: "fertilizacion", label: "Fertilización" },
+          { value: "ambos", label: "Ambos" },
+        ]}
+        valor={f.ambito}
+        onCambio={(v) => setF({ ...f, ambito: v || "ambos" })}
+      />
+      <Boton grande className="w-full" disabled={!f.nombre?.trim()} onClick={guardar}>
+        Guardar
+      </Boton>
+      {item && (
+        <Boton
+          variante="peligro"
+          className="w-full"
+          onClick={async () => {
+            await supabase.from("asesores").update({ activo: false }).eq("id", item.id);
+            onHecho("Asesor quitado");
+          }}
+        >
+          Quitar asesor
+        </Boton>
+      )}
     </div>
   );
 }

@@ -5,6 +5,8 @@ import { Boton, Campo, Fichas, Input, claseInput } from "./ui";
 import { euros, hoyISO, nombreRecinto, num } from "@/lib/formato";
 
 export const CATEGORIAS_APLICACION = ["tratamiento", "fertilizacion", "herbicida"];
+const METODOS_FERTILIZACION = [["abonadora", "Abonadora"], ["fertirrigacion", "Fertirrigación"], ["foliar", "Foliar"], ["localizado", "Localizado"], ["enterrado", "Enterrado"], ["cuba", "Cuba"]];
+const METODOS_TRATAMIENTO = [["pulverizacion", "Pulverización"], ["cuba", "Cuba / mochila"], ["espolvoreo", "Espolvoreo"], ["otro", "Otro"]];
 const TIPO_APLICACION = { tratamiento: "fitosanitario", fertilizacion: "fertilizacion", herbicida: "herbicida" };
 
 function horaDe(iso) {
@@ -49,6 +51,8 @@ export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar
   const [obs, setObs] = useState(inicial.observaciones || "");
   const [prods, setProds] = useState(inicial.aplicacion?.productos || []);
   const [motivo, setMotivo] = useState(inicial.aplicacion?.plaga_o_motivo || "");
+  const [metodo, setMetodo] = useState(inicial.aplicacion?.metodo_aplicacion || "");
+  const [justificacion, setJustificacion] = useState(inicial.aplicacion?.justificacion || "");
   const [verTodasLabores, setVerTodasLabores] = useState(false);
   const [verTodosRecintos, setVerTodosRecintos] = useState(false);
 
@@ -138,6 +142,8 @@ export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar
       payload.aplicacion = {
         tipo: TIPO_APLICACION[labor.categoria],
         plaga_o_motivo: motivo || null,
+        metodo_aplicacion: metodo || null,
+        justificacion: justificacion || null,
         productos: prods.map((p) => ({ ...p, dosis_ha: String(p.dosis_ha).replace(",", ".") })),
       };
     }
@@ -212,7 +218,16 @@ export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar
               Total: {prods.map((p) => `${num((Number(String(p.dosis_ha).replace(",", ".")) || 0) * superficie, 1)} ${productos.find((x) => x.id === p.producto_id)?.unidad}`).join(" + ")} en {num(superficie)} ha
             </p>
           )}
-          <Input className="mt-3" placeholder="Motivo / plaga (ej. repilo, prays…)" value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+          <Input className="mt-3" placeholder={labor.categoria === "fertilizacion" ? "Motivo (ej. abonado de fondo, cobertera…)" : "Motivo / plaga (ej. repilo, prays…)"} value={motivo} onChange={(e) => setMotivo(e.target.value)} />
+          <p className="mb-1 mt-3 text-sm font-bold text-tierra-700">¿Cómo se ha aplicado?</p>
+          <Fichas
+            opciones={(labor.categoria === "fertilizacion" ? METODOS_FERTILIZACION : METODOS_TRATAMIENTO).map(([value, label]) => ({ value, label }))}
+            valor={metodo}
+            onCambio={(v) => setMetodo(v || "")}
+          />
+          {labor.categoria !== "fertilizacion" && (
+            <Input className="mt-3" placeholder="Justificación (opcional: umbral, aviso, recomendación del asesor…)" value={justificacion} onChange={(e) => setJustificacion(e.target.value)} />
+          )}
         </div>
       )}
 

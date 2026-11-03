@@ -152,6 +152,10 @@ export default function Inicio() {
       <Link href="/cosechas?nueva=1" className="mt-3 flex items-center gap-3 rounded-2xl border-2 border-tierra-100 bg-tierra-50 px-4 py-3 font-extrabold text-tierra-700">
         <span className="text-2xl">🧺</span> Apuntar entrega de cosecha
       </Link>
+      <Link href="/agronomia" className="mt-3 flex items-center gap-3 rounded-2xl border-2 border-olivo-100 bg-olivo-50 px-4 py-3 font-extrabold text-olivo-800">
+        <span className="text-2xl">🌿</span> Preguntar a AgronomIA
+        <span className="ml-auto text-sm font-semibold text-olivo-600">plagas, abonado, riego…</span>
+      </Link>
 
       {alertas.length > 0 && (
         <Seccion titulo="Avisos">

@@ -413,12 +413,15 @@ function EditarParcela({ parcela, fincas, onHecho }) {
   const [nuevaFinca, setNuevaFinca] = useState("");
   const [cult, setCult] = useState(Object.fromEntries(mios.map((r) => [r.id, cultivos.find((c) => c.nombre === r.cultivo)?.id || ""])));
   const [variedad, setVariedad] = useState(Object.fromEntries(mios.map((r) => [r.id, r.variedad || ""])));
+  const [vulnerable, setVulnerable] = useState(Object.fromEntries(mios.map((r) => [r.id, !!r.zona_vulnerable])));
 
   async function guardar() {
     try {
       const fid = await obtenerFinca(empresaId, fincaId, nuevaFinca);
       const { error } = await supabase.from("parcelas").update({ nombre, finca_id: fid }).eq("id", parcela.id);
       if (error) throw error;
+      for (const r of mios)
+        if (!!r.zona_vulnerable !== !!vulnerable[r.id]) await supabase.from("recintos").update({ zona_vulnerable: !!vulnerable[r.id] }).eq("id", r.id);
       for (const r of mios)
         await asignarCultivo({
           empresaId,
@@ -455,6 +458,10 @@ function EditarParcela({ parcela, fincas, onHecho }) {
             <Select vacio="Sin cultivo" opciones={cultivos.map((c) => ({ value: c.id, label: c.nombre }))} value={cult[r.id]} onChange={(e) => setCult({ ...cult, [r.id]: e.target.value })} />
             <Input placeholder="Variedad" value={variedad[r.id]} onChange={(e) => setVariedad({ ...variedad, [r.id]: e.target.value })} />
           </div>
+          <label className="mt-2 flex items-center gap-2 text-sm">
+            <input type="checkbox" className="h-5 w-5 accent-olivo-700" checked={!!vulnerable[r.id]} onChange={(e) => setVulnerable({ ...vulnerable, [r.id]: e.target.checked })} />
+            En zona vulnerable a nitratos
+          </label>
         </Tarjeta>
       ))}
       <Boton grande className="w-full" onClick={guardar}>
