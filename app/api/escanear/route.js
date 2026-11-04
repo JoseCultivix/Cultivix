@@ -1,6 +1,6 @@
 // Lectura de albaranes/facturas/tickets con IA (OCR + interpretación).
 // Devuelve una propuesta; el usuario la revisa antes de guardar (FLUJO-021/022/027).
-import { comprobarLimiteIA, claude, clienteDelUsuario, entradaHerramienta, MODELO, respuestaError, rolEnEmpresa } from "@/lib/servidor";
+import { comprobarLimiteIA, clienteDelUsuario, MODELO, pedirConHerramienta, respuestaError, rolEnEmpresa } from "@/lib/servidor";
 
 export const maxDuration = 60;
 
@@ -73,15 +73,13 @@ export async function POST(req) {
     if (!base64) return Response.json({ error: "Falta la imagen" }, { status: 400 });
 
     if (tipo === "cosecha") {
-      const r = await claude().messages.create({
-        model: MODELO,
+      const { datos } = await pedirConHerramienta({
         max_tokens: 1500,
         system: "Lees tickets de entrega de cosecha de agricultores españoles (básculas de almazaras, cooperativas, compradores). Extrae los datos con precisión. Si un dato no aparece, déjalo vacío. No inventes cifras.",
-        tools: [HERRAMIENTA_COSECHA],
-        tool_choice: { type: "tool", name: "ticket_cosecha" },
+        herramienta: HERRAMIENTA_COSECHA,
         messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: media_type || "image/jpeg", data: base64 } }, { type: "text", text: "Extrae los datos de este ticket." }] }],
       });
-      const out = entradaHerramienta(r) || {};
+      const out = datos || {};
       await supabase.from("acciones_ia").insert({ empresa_id, usuario_id: user.id, canal: "documento", entrada: "ticket cosecha", propuesta: out, estado: "propuesta", modelo: MODELO });
       return Response.json(out);
     }
@@ -96,8 +94,7 @@ export async function POST(req) {
         ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } }
         : { type: "image", source: { type: "base64", media_type: media_type || "image/jpeg", data: base64 } };
 
-    const r = await claude().messages.create({
-      model: MODELO,
+    const { datos } = await pedirConHerramienta({
       max_tokens: 3000,
       system: `Lees documentos de compra de agricultores españoles (albaranes de cooperativas, almacenes de fitosanitarios, gasolineras…).
 Extrae los datos con precisión. Reglas:
@@ -108,12 +105,11 @@ Extrae los datos con precisión. Reglas:
 Catálogo de productos del agricultor (id | nombre | tipo | unidad):
 ${(productos || []).map((p) => `${p.id} | ${p.nombre} | ${p.tipo} | ${p.unidad}`).join("\n") || "(vacío)"}
 Proveedores conocidos: ${(proveedores || []).map((p) => p.nombre).join(", ") || "(ninguno)"}`,
-      tools: [HERRAMIENTA],
-      tool_choice: { type: "tool", name: "documento_compra" },
+      herramienta: HERRAMIENTA,
       messages: [{ role: "user", content: [bloque, { type: "text", text: "Extrae los datos de este documento." }] }],
     });
 
-    const out = entradaHerramienta(r) || { tipo_documento: "otro", lineas: [] };
+    const out = datos || { tipo_documento: "otro", lineas: [] };
     out.lineas = (out.lineas || []).map((l) => ({
       ...l,
       producto_id: (productos || []).some((p) => p.id === l.producto_id) ? l.producto_id : null,

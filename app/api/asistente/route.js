@@ -1,7 +1,7 @@
 // Asistente Cultivix: interpreta lo que dice el agricultor (texto o voz) y
 // devuelve una PROPUESTA estructurada. Nunca guarda nada por sí mismo:
 // el usuario confirma en la app (DEC-051, UX-005).
-import { comprobarLimiteIA, ahoraEspana, claude, clienteDelUsuario, entradaHerramienta, MODELO, respuestaError, rolEnEmpresa } from "@/lib/servidor";
+import { comprobarLimiteIA, ahoraEspana, clienteDelUsuario, MODELO, pedirConHerramienta, respuestaError, rolEnEmpresa } from "@/lib/servidor";
 
 export const maxDuration = 60;
 
@@ -176,15 +176,13 @@ ${gestor ? `\n=== COMPRAS ÚLTIMOS 12 MESES (fecha | proveedor | total € | lí
       else mensajes.push(m);
     }
 
-    const r = await claude().messages.create({
-      model: MODELO,
-      max_tokens: 2000,
-      system: sistema,
-      tools: [HERRAMIENTA],
-      tool_choice: { type: "tool", name: "responder" },
-      messages: mensajes,
-    });
-    const out = entradaHerramienta(r) || { tipo: "no_entendido", mensaje: "No te he entendido bien. ¿Me lo dices de otra forma?" };
+    const { datos, texto } = await pedirConHerramienta({ system: sistema, messages: mensajes, herramienta: HERRAMIENTA, max_tokens: 2000 });
+    const out =
+      datos && datos.tipo
+        ? datos
+        : texto
+        ? { tipo: "consulta", mensaje: texto }
+        : { tipo: "no_entendido", mensaje: "No te he entendido bien. ¿Me lo dices de otra forma?" };
 
     // ---- Validación: descartar cualquier ID que no exista en sus datos ----
     const ok = (ids, arr) => (ids || []).filter((id) => arr.some((x) => x.id === id));
