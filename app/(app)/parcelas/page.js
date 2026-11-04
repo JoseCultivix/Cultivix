@@ -7,6 +7,9 @@ import { Boton, Campo, Etiqueta, Fichas, Hoja, Input, Pagina, Select, Tarjeta, V
 import { bbox, centro } from "@/lib/geo";
 import { asignarCultivo } from "@/lib/campanas";
 import { CULTIVO_POR_USO, USOS_SIGPAC, num } from "@/lib/formato";
+import dynamic from "next/dynamic";
+
+const MapaSigpac = dynamic(() => import("@/components/MapaSigpac"), { ssr: false, loading: () => <div className="grid h-full place-items-center text-stone-500">Cargando mapa…</div> });
 
 export default function PaginaParcelas() {
   return (
@@ -167,8 +170,29 @@ function SelectorFinca({ fincas, fincaId, setFincaId, nueva, setNueva }) {
 }
 
 function ImportarSigpac({ fincas, parcelas, onHecho }) {
-  const { empresaId, campanas, cultivos, actualizarGps, notificar, recintos: existentes } = useApp();
-  const [modo, setModo] = useState("gps");
+  const { empresaId, campanas, cultivos, actualizarGps, notificar, recintos: existentes, gps } = useApp();
+  const [modo, setModo] = useState("mapa");
+  const [lugar, setLugar] = useState("");
+  const [lugares, setLugares] = useState(null);
+  const [centrarEn, setCentrarEn] = useState(null);
+
+  async function buscarLugar() {
+    if (lugar.trim().length < 2) return;
+    setLugares([]);
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&countrycodes=es&limit=6&accept-language=es&q=${encodeURIComponent(lugar.trim())}`);
+      const j = await r.json();
+      setLugares(j.map((x) => ({ nombre: x.display_name, lat: Number(x.lat), lon: Number(x.lon) })));
+      if (j.length === 1) irA(j[0].lat, j[0].lon);
+    } catch {
+      notificar("No se ha podido buscar ese sitio ahora", "error");
+      setLugares(null);
+    }
+  }
+  function irA(lat, lon, zoom = 15) {
+    setCentrarEn({ lat: Number(lat), lon: Number(lon), zoom, t: Date.now() });
+    setLugares(null);
+  }
   const [ref, setRef] = useState({ pr: "", mu: "", po: "", pa: "", ag: "0", zo: "0" });
   const [buscando, setBuscando] = useState(false);
   const [res, setRes] = useState(null);
@@ -180,12 +204,13 @@ function ImportarSigpac({ fincas, parcelas, onHecho }) {
   const [nuevaFinca, setNuevaFinca] = useState("");
   const [guardando, setGuardando] = useState(false);
 
-  async function buscar() {
+  async function buscar(punto) {
     setBuscando(true);
-    setRes(null);
+    if (!punto) setRes(null);
     try {
       let url;
-      if (modo === "gps") {
+      if (punto) url = `/api/sigpac?lat=${punto.lat}&lon=${punto.lon}`;
+      else if (modo === "gps") {
         const p = await actualizarGps();
         if (!p) throw new Error("No se pudo obtener tu ubicación. Activa el GPS.");
         url = `/api/sigpac?lat=${p.lat}&lon=${p.lon}`;
@@ -294,14 +319,58 @@ function ImportarSigpac({ fincas, parcelas, onHecho }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-1 rounded-2xl bg-stone-200/70 p-1 font-bold">
-        <button type="button" onClick={() => setModo("gps")} className={`rounded-xl py-3 ${modo === "gps" ? "bg-white text-olivo-800 shadow" : "text-stone-600"}`}>
-          📍 Estoy en la parcela
-        </button>
-        <button type="button" onClick={() => setModo("ref")} className={`rounded-xl py-3 ${modo === "ref" ? "bg-white text-olivo-800 shadow" : "text-stone-600"}`}>
-          🔢 Referencia
-        </button>
+      <div className="grid grid-cols-3 gap-1 rounded-2xl bg-stone-200/70 p-1 text-[15px] font-bold">
+        {[["mapa", "🗺️ En el mapa"], ["gps", "📍 Estoy aquí"], ["ref", "🔢 Referencia"]].map(([k, t]) => (
+          <button key={k} type="button" onClick={() => { setModo(k); setRes(null); }} className={`rounded-xl py-3 ${modo === k ? "bg-white text-olivo-800 shadow" : "text-stone-600"}`}>
+            {t}
+          </button>
+        ))}
       </div>
+      {modo === "mapa" && (
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <Input placeholder="Pueblo o paraje (ej. Martos, Jaén)" value={lugar} onChange={(e) => setLugar(e.target.value)} onKeyDown={(e) => e.key === "Enter" && buscarLugar()} />
+            <Boton variante="secundario" onClick={buscarLugar}>
+              Buscar
+            </Boton>
+            <Boton
+              variante="secundario"
+              aria-label="Ir a mi ubicación"
+              onClick={async () => {
+                const p = await actualizarGps();
+                if (p) irA(p.lat, p.lon, 17);
+                else notificar("No se pudo obtener tu ubicación", "error");
+              }}
+            >
+              📍
+            </Boton>
+          </div>
+          {lugares && (
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded-xl bg-white p-1 shadow">
+              {lugares.length === 0 && <p className="p-2 text-sm text-stone-500">Buscando…</p>}
+              {lugares.map((l, i) => (
+                <button key={i} type="button" onClick={() => irA(l.lat, l.lon)} className="block w-full rounded-lg px-2 py-2 text-left text-sm active:bg-olivo-50">
+                  {l.nombre}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="h-[55vh] overflow-hidden rounded-2xl border border-stone-200">
+            <MapaSigpac
+              existentes={existentes}
+              resultado={res || []}
+              sel={sel}
+              gps={gps}
+              centrarEn={centrarEn}
+              onPunto={(lat, lon) => !buscando && buscar({ lat, lon })}
+              onToggle={(rec) => setSel((s) => (s.includes(rec) ? s.filter((x) => x !== rec) : [...s, rec]))}
+            />
+          </div>
+          <p className="text-sm text-stone-600">
+            {buscando ? "Consultando SIGPAC…" : res ? "Toca más recintos de esta parcela para añadirlos, o toca otra parcela." : "Toca tu parcela en el mapa. En azul, las que ya tienes."}
+          </p>
+        </div>
+      )}
       {modo === "ref" && (
         <div className="grid grid-cols-4 gap-2">
           {[["pr", "Prov."], ["mu", "Munic."], ["po", "Políg."], ["pa", "Parcela"]].map(([k, t]) => (
@@ -312,9 +381,11 @@ function ImportarSigpac({ fincas, parcelas, onHecho }) {
           <p className="col-span-4 text-xs text-stone-500">Los códigos están en tu declaración PAC o en el visor SIGPAC (ej. Jaén = 23). Agregado y zona suelen ser 0.</p>
         </div>
       )}
-      <Boton grande className="w-full" disabled={buscando} onClick={buscar}>
-        {buscando ? "Consultando SIGPAC…" : modo === "gps" ? "Buscar recinto aquí" : "Buscar parcela"}
-      </Boton>
+      {modo !== "mapa" && (
+        <Boton grande className="w-full" disabled={buscando} onClick={() => buscar()}>
+          {buscando ? "Consultando SIGPAC…" : modo === "gps" ? "Buscar recinto aquí" : "Buscar parcela"}
+        </Boton>
+      )}
 
       {res && (
         <>
