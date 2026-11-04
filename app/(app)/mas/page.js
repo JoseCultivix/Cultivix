@@ -10,6 +10,7 @@ export default function Mas() {
   const { esGestor, empresas, empresa, cambiarEmpresa, perfil, rol, esAdminPlataforma } = useApp();
   const router = useRouter();
   const items = [
+    ["/calendario", "📅", "Calendario", true],
     ["/partes", "📋", esGestor ? "Partes de trabajo" : "Mis partes", true],
     ["/cosechas", "🧺", "Cosechas", true],
     ["/parcelas", "🗺️", "Parcelas y SIGPAC", true],
