@@ -176,7 +176,9 @@ ${gestor ? `\n=== COMPRAS ÚLTIMOS 12 MESES (fecha | proveedor | total € | lí
       else mensajes.push(m);
     }
 
-    const { datos, texto } = await pedirConHerramienta({ system: sistema, messages: mensajes, herramienta: HERRAMIENTA, max_tokens: 2000 });
+    const { datos, texto } = await pedirConHerramienta({ system: sistema, messages: mensajes, herramienta: HERRAMIENTA, max_tokens: 2000,
+      valido: (d) => !!d.tipo && (!["registrar_trabajo", "iniciar_trabajo"].includes(d.tipo) || (d.parte && typeof d.parte === "object")),
+    });
     const out =
       datos && datos.tipo
         ? datos
@@ -185,7 +187,13 @@ ${gestor ? `\n=== COMPRAS ÚLTIMOS 12 MESES (fecha | proveedor | total € | lí
         : { tipo: "no_entendido", mensaje: "No te he entendido bien. ¿Me lo dices de otra forma?" };
 
     // ---- Validación: descartar cualquier ID que no exista en sus datos ----
-    const ok = (ids, arr) => (ids || []).filter((id) => arr.some((x) => x.id === id));
+    if (out.parte && typeof out.parte !== "object") out.parte = null;
+    if (out.aplicacion && typeof out.aplicacion !== "object") out.aplicacion = null;
+    if (["registrar_trabajo", "iniciar_trabajo"].includes(out.tipo) && !out.parte) {
+      out.tipo = "no_entendido";
+      out.mensaje = "No he podido preparar el parte. ¿Me lo repites, por ejemplo: «ayer traté la parcela X con producto Y a tantos kilos por hectárea»?";
+    }
+    const ok = (ids, arr) => (Array.isArray(ids) ? ids : []).filter((id) => arr.some((x) => x.id === id));
     if (out.parte) {
       out.parte.labor_id = (lab.data || []).some((l) => l.id === out.parte.labor_id) ? out.parte.labor_id : null;
       out.parte.recinto_ids = ok(out.parte.recinto_ids, recintos);
