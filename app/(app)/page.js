@@ -35,14 +35,20 @@ export default function Inicio() {
     const hoyStr = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
     supabase
       .from("tareas_planificadas")
-      .select("id, fecha, hora, labor_id, recinto_ids, trabajador_ids")
+      .select("id, fecha, hora, labor_id, recinto_ids, trabajador_ids, creado_por")
       .eq("empresa_id", empresaId)
       .eq("estado", "pendiente")
-      .lte("fecha", hoyStr)
-      .order("fecha", { ascending: false })
+      .lte("fecha", new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10))
+      .order("fecha")
       .order("hora", { nullsFirst: false })
-      .limit(50)
-      .then(({ data }) => setTareasHoy((data || []).map((t) => ({ ...t, hoy: t.fecha === hoyStr }))));
+      .limit(100)
+      .then(async ({ data }) => {
+        const filas = data || [];
+        const autores = [...new Set(filas.map((t) => t.creado_por).filter(Boolean))];
+        const { data: eu } = autores.length ? await supabase.from("empresa_usuarios").select("usuario_id, rol").eq("empresa_id", empresaId).in("usuario_id", autores) : { data: [] };
+        const tecnicos = new Set((eu || []).filter((x) => x.rol === "tecnico").map((x) => x.usuario_id));
+        setTareasHoy(filas.map((t) => ({ ...t, hoy: t.fecha === hoyStr, futura: t.fecha > hoyStr, deTecnico: tecnicos.has(t.creado_por) })));
+      });
     // "El año pasado por estas fechas…" (FLUJO 1, paso 8)
     const d = new Date();
     const desde = new Date(d.getFullYear() - 1, d.getMonth(), d.getDate() - 7).toISOString().slice(0, 10);
@@ -169,7 +175,9 @@ export default function Inicio() {
         const yo = trabajadores.find((t) => t.usuario_id === perfil?.id);
         const mias = tareasHoy.filter((t) => esGestor || !t.trabajador_ids?.length || (yo && t.trabajador_ids.includes(yo.id)));
         const deHoy = mias.filter((t) => t.hoy);
-        const atrasadas = mias.length - deHoy.length;
+        const futuras = mias.filter((t) => t.futura);
+        const atrasadas = mias.length - deHoy.length - futuras.length;
+        const delTecnico = futuras.filter((t) => t.deTecnico).length + deHoy.filter((t) => t.deTecnico).length;
         if (!mias.length) return null;
         return (
           <Link href="/calendario" className="mt-3 block rounded-2xl border-2 border-dashed border-olivo-300 bg-white px-4 py-3">
@@ -177,6 +185,7 @@ export default function Inicio() {
             {deHoy.slice(0, 4).map((t) => (
               <p key={t.id} className="text-[15px] text-stone-700">
                 {t.hora ? `${t.hora.slice(0, 5)} · ` : ""}
+                {t.deTecnico ? "🧑‍🌾 " : ""}
                 <b>{labores.find((l) => l.id === t.labor_id)?.nombre || "Tarea"}</b>
                 {t.recinto_ids?.length ? ` · ${recintos.filter((r) => t.recinto_ids.includes(r.id)).map((r) => nombreRecinto(r, r.n_en_parcela)).join(", ")}` : ""}
                 {esGestor && t.trabajador_ids?.length ? ` · ${t.trabajador_ids.map((id) => trabajadores.find((x) => x.id === id)?.nombre).filter(Boolean).join(", ")}` : ""}
@@ -184,6 +193,11 @@ export default function Inicio() {
             ))}
             {deHoy.length > 4 && <p className="text-sm text-stone-500">y {deHoy.length - 4} más…</p>}
             {!deHoy.length && <p className="text-[15px] text-stone-600">Nada planificado para hoy.</p>}
+            {futuras.length > 0 && (
+              <p className="mt-1 text-sm text-stone-600">
+                📅 {futuras.length} planificada(s) para los próximos días{delTecnico ? ` · 🧑‍🌾 ${delTecnico} de tu técnico` : ""}
+              </p>
+            )}
             {atrasadas > 0 && <p className="mt-1 text-sm font-bold text-red-700">⚠️ {atrasadas} de días pasados sin hacer</p>}
           </Link>
         );

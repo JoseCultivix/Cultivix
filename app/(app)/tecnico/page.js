@@ -13,11 +13,30 @@ export default function PanelTecnico() {
   const navegar = useNavegar();
   const [filas, setFilas] = useState(null);
   const [error, setError] = useState(null);
+  const [tareas, setTareas] = useState({}); // empresa_id -> { proximas, atrasadas, hechas7 }
 
   useEffect(() => {
-    supabase.rpc("panel_explotaciones").then(({ data, error }) => {
+    supabase.rpc("panel_explotaciones").then(async ({ data, error }) => {
       if (error) setError(error.message);
       setFilas(data || []);
+      const ids = (data || []).map((f) => f.empresa_id);
+      if (!ids.length) return;
+      const d = new Date();
+      const hoy = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+      const hace7 = new Date(d.getTime() - 7 * 86400000).toISOString();
+      const { data: ts } = await supabase
+        .from("tareas_planificadas")
+        .select("empresa_id, fecha, estado, hecha_en")
+        .in("empresa_id", ids)
+        .or(`estado.eq.pendiente,hecha_en.gte.${hace7}`)
+        .limit(2000);
+      const m = {};
+      for (const t of ts || []) {
+        const x = (m[t.empresa_id] = m[t.empresa_id] || { proximas: 0, atrasadas: 0, hechas7: 0 });
+        if (t.estado === "pendiente") t.fecha < hoy ? x.atrasadas++ : x.proximas++;
+        else if (t.estado === "hecha") x.hechas7++;
+      }
+      setTareas(m);
     });
   }, []);
 
@@ -61,9 +80,13 @@ export default function PanelTecnico() {
                     <span className={Number(f.recintos_exceso) ? "font-bold text-red-700" : "text-stone-500"}>🌾 {f.recintos_exceso} con exceso de abonado</span>
                     <span className={Number(f.campanas_sin_plan) ? "font-bold text-amber-700" : "text-stone-500"}>📝 {f.campanas_sin_plan} campaña(s) sin plan de abonado</span>
                     <span className={Number(f.partes_pendientes) ? "font-bold text-amber-700" : "text-stone-500"}>📋 {f.partes_pendientes} parte(s) por validar</span>
+                    <span className="text-stone-600">📌 {tareas[f.empresa_id]?.proximas || 0} tarea(s) planificadas · ✅ {tareas[f.empresa_id]?.hechas7 || 0} hechas en 7 días</span>
+                    <span className={tareas[f.empresa_id]?.atrasadas ? "font-bold text-red-700" : "text-stone-500"}>⚠️ {tareas[f.empresa_id]?.atrasadas || 0} tarea(s) sin hacer</span>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {[
+                      ["/calendario?nueva=1", "📌 Planificar"],
+                      ["/calendario", "Calendario"],
                       ["/cuaderno/oficial", "Cuaderno"],
                       ["/fertilizacion", "Abonado"],
                       ["/plazos", "Plazos"],
@@ -81,7 +104,7 @@ export default function PanelTecnico() {
         </>
       )}
       <p className="mt-6 text-xs text-stone-500">
-        Para llevar una explotación nueva, pide al agricultor que te invite desde Ajustes → Equipo con el rol «Técnico / asesor». Como técnico ves el cuaderno, los tratamientos y el abonado, y puedes poner el plan de abonado; no ves la economía.
+        Para llevar una explotación nueva, pide al agricultor que te invite desde Ajustes → Equipo con el rol «Técnico / asesor». Como técnico ves el cuaderno, los tratamientos y el abonado, puedes poner el plan de abonado y planificarle tareas (tratamientos, abonados, riegos…) que le aparecerán en su calendario; no ves la economía ni los datos de sus trabajadores.
       </p>
     </Pagina>
   );

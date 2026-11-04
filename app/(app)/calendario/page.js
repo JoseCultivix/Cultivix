@@ -63,6 +63,24 @@ export default function Calendario() {
   const [atrasadas, setAtrasadas] = useState([]);
   const [hojaTarea, setHojaTarea] = useState(null); // { modo: "nueva" | "ver" | "editar" | "hecha" | "atrasadas", tarea }
   const [repetir, setRepetir] = useState({ cada: "", veces: 4 });
+  const [miembros, setMiembros] = useState({}); // usuario_id -> { nombre, rol }
+  useEffect(() => {
+    if (!empresaId) return;
+    (async () => {
+      const { data: eu } = await supabase.from("empresa_usuarios").select("usuario_id, rol").eq("empresa_id", empresaId);
+      const ids = (eu || []).map((x) => x.usuario_id);
+      const { data: us } = ids.length ? await supabase.from("usuarios").select("id, nombre").in("id", ids) : { data: [] };
+      setMiembros(Object.fromEntries((eu || []).map((x) => [x.usuario_id, { rol: x.rol, nombre: (us || []).find((u) => u.id === x.usuario_id)?.nombre || "" }])));
+    })();
+  }, [empresaId]);
+  const autorDe = (t) => miembros[t?.creado_por];
+  // Desde el panel del técnico: /calendario?nueva=1 abre directamente el formulario
+  useEffect(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("nueva") === "1" && puedePlanificar) {
+      window.history.replaceState(window.history.state, "", "/calendario");
+      setHojaTarea({ modo: "nueva", tarea: { fecha: sumar(hoyISO(), 1), recinto_ids: [], trabajador_ids: [], datos: {} } });
+    }
+  }, [puedePlanificar]);
   const [vista, setVista] = useState("mes");
   const [ref, setRef] = useState(hoyISO());
   const [filtroTrab, setFiltroTrab] = useState("todos");
@@ -266,7 +284,14 @@ export default function Calendario() {
     setHojaTarea(null);
     cargar();
   }
-  const inicialDeTarea = (t, fecha) => ({
+  const inicialDeTarea = (t, fecha) => {
+    const a = autorDe(t);
+    const base = inicialBase(t, fecha);
+    if (a?.rol === "tecnico" && base.aplicacion && !base.aplicacion.justificacion)
+      base.aplicacion = { ...base.aplicacion, justificacion: `Recomendado por ${a.nombre || "el técnico"} (técnico/asesor)` };
+    return base;
+  };
+  const inicialBase = (t, fecha) => ({
     labor_id: t.labor_id,
     fecha: fecha || t.fecha,
     hora_inicio: t.hora ? t.hora.slice(0, 5) : "",
@@ -380,7 +405,7 @@ export default function Calendario() {
                   {porDia[f]?.length || tareasPorDia[f]?.length ? (
                     <div className="space-y-1.5">
                       {(tareasPorDia[f] || []).map((t) => (
-                        <TarjetaTarea key={t.id} t={t} hoy={hoy} compacta {...{ nomLabor, nomTrab, recintos }} onClick={() => setHojaTarea({ modo: "ver", tarea: t })} />
+                        <TarjetaTarea key={t.id} t={t} hoy={hoy} compacta autor={autorDe(t)} {...{ nomLabor, nomTrab, recintos }} onClick={() => setHojaTarea({ modo: "ver", tarea: t })} />
                       ))}
                       {(porDia[f] || []).map((p) => (
                         <TarjetaParte key={p.id} p={p} compacta {...{ nomLabor, nomTrab, recintos, horasDe }} onClick={() => setDetalle(p)} />
@@ -397,7 +422,7 @@ export default function Calendario() {
             (porDia[ref]?.length || tareasPorDia[ref]?.length ? (
               <div className="space-y-2">
                 {(tareasPorDia[ref] || []).map((t) => (
-                  <TarjetaTarea key={t.id} t={t} hoy={hoy} {...{ nomLabor, nomTrab, recintos }} onClick={() => setHojaTarea({ modo: "ver", tarea: t })} />
+                  <TarjetaTarea key={t.id} t={t} hoy={hoy} autor={autorDe(t)} {...{ nomLabor, nomTrab, recintos }} onClick={() => setHojaTarea({ modo: "ver", tarea: t })} />
                 ))}
                 {(porDia[ref] || []).map((p) => (
                   <TarjetaParte key={p.id} p={p} {...{ nomLabor, nomTrab, recintos, horasDe }} onClick={() => setDetalle(p)} />
@@ -531,12 +556,12 @@ export default function Calendario() {
           <div className="space-y-2">
             <p className="text-[15px] text-stone-600">Planificadas para días que ya han pasado. Ábrelas para apuntarlas como hechas, cambiarlas de día o quitarlas.</p>
             {atrasadasF.map((t) => (
-              <TarjetaTarea key={t.id} t={t} hoy={hoy} conFecha {...{ nomLabor, nomTrab, recintos }} onClick={() => setHojaTarea({ modo: "ver", tarea: t })} />
+              <TarjetaTarea key={t.id} t={t} hoy={hoy} conFecha autor={autorDe(t)} {...{ nomLabor, nomTrab, recintos }} onClick={() => setHojaTarea({ modo: "ver", tarea: t })} />
             ))}
           </div>
         )}
         {hojaTarea?.modo === "ver" && (
-          <DetalleTarea t={hojaTarea.tarea} hoy={hoy} {...{ nomTrab, recintos, maquinaria, aperos, productos }}>
+          <DetalleTarea t={hojaTarea.tarea} hoy={hoy} autor={autorDe(hojaTarea.tarea)} {...{ nomTrab, recintos, maquinaria, aperos, productos }}>
             <div className="mt-4 flex flex-col gap-2">
               {puedeHacer(hojaTarea.tarea) && (
                 <Boton onClick={() => setHojaTarea({ ...hojaTarea, modo: "hecha" })}>✅ Ya está hecha: apuntar el parte</Boton>
@@ -556,6 +581,11 @@ export default function Calendario() {
         )}
         {(hojaTarea?.modo === "nueva" || hojaTarea?.modo === "editar") && (
           <>
+            {rol === "tecnico" && (
+              <p className="mb-3 rounded-2xl bg-tierra-50 p-3 text-[15px] text-tierra-800">
+                🧑‍🌾 La tarea le aparecerá al agricultor en su calendario y en Inicio. Él decide quién de su equipo la hace.
+              </p>
+            )}
             {hojaTarea.modo === "nueva" && (
               <div className="mb-4 rounded-2xl bg-olivo-50 p-3">
                 <p className="mb-2 text-sm font-bold text-olivo-900">¿Se repite?</p>
@@ -612,7 +642,7 @@ function mismoDiaMes(s, n) {
   return aISO(x);
 }
 
-function TarjetaTarea({ t, hoy, compacta, conFecha, nomLabor, nomTrab, recintos, onClick }) {
+function TarjetaTarea({ t, hoy, compacta, conFecha, autor, nomLabor, nomTrab, recintos, onClick }) {
   const rs = recintos.filter((r) => t.recinto_ids?.includes(r.id));
   const atrasada = t.fecha < hoy;
   const col = colorDe(t.labor_id);
@@ -634,6 +664,7 @@ function TarjetaTarea({ t, hoy, compacta, conFecha, nomLabor, nomTrab, recintos,
             t.trabajador_ids?.length ? `👤 ${t.trabajador_ids.map(nomTrab).join(", ")}` : "Sin asignar",
             t.datos?.aplicacion?.productos?.length ? "🧴" : null,
             t.grupo_id ? "🔁" : null,
+            autor?.rol === "tecnico" ? `🧑‍🌾 ${autor.nombre || "Técnico"}` : null,
           ]
             .filter(Boolean)
             .join(" · ")}
@@ -643,7 +674,7 @@ function TarjetaTarea({ t, hoy, compacta, conFecha, nomLabor, nomTrab, recintos,
   );
 }
 
-function DetalleTarea({ t, hoy, nomTrab, recintos, maquinaria, aperos, productos, children }) {
+function DetalleTarea({ t, hoy, autor, nomTrab, recintos, maquinaria, aperos, productos, children }) {
   const rs = recintos.filter((r) => t.recinto_ids?.includes(r.id));
   const ms = maquinaria.filter((m) => t.datos?.maquinaria_ids?.includes(m.id));
   const as = aperos.filter((a) => t.datos?.apero_ids?.includes(a.id));
@@ -654,7 +685,9 @@ function DetalleTarea({ t, hoy, nomTrab, recintos, maquinaria, aperos, productos
       <div className="mb-2 flex flex-wrap gap-2">
         <Etiqueta color={t.fecha < hoy ? "rojo" : "gris"}>{t.fecha < hoy ? "Sin hacer" : "Planificada"}</Etiqueta>
         {t.grupo_id && <Etiqueta color="gris">🔁 Se repite</Etiqueta>}
+        {autor?.rol === "tecnico" && <Etiqueta color="tierra">🧑‍🌾 Del técnico</Etiqueta>}
       </div>
+      <Fila k="Planificada por">{autor ? `${autor.nombre || "—"}${autor.rol === "tecnico" ? " (técnico/asesor)" : ""}` : null}</Fila>
       <Fila k="Para el día">
         {fechaLarga(t.fecha)}
         {t.hora ? ` · ${t.hora.slice(0, 5)}` : ""}
