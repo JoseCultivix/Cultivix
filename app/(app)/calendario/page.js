@@ -56,7 +56,13 @@ function rango(vista, ref) {
 }
 
 export default function Calendario() {
-  const { empresaId, esGestor, labores, recintos, trabajadores, maquinaria, aperos, productos, notificar } = useApp();
+  const { empresaId, esGestor, rol, perfil, labores, recintos, trabajadores, maquinaria, aperos, productos, notificar } = useApp();
+  const puedePlanificar = esGestor || rol === "tecnico";
+  const yo = trabajadores.find((t) => t.usuario_id === perfil?.id);
+  const [tareas, setTareas] = useState([]);
+  const [atrasadas, setAtrasadas] = useState([]);
+  const [hojaTarea, setHojaTarea] = useState(null); // { modo: "nueva" | "ver" | "editar" | "hecha" | "atrasadas", tarea }
+  const [repetir, setRepetir] = useState({ cada: "", veces: 4 });
   const [vista, setVista] = useState("mes");
   const [ref, setRef] = useState(hoyISO());
   const [filtroTrab, setFiltroTrab] = useState("todos");
@@ -84,6 +90,12 @@ export default function Calendario() {
       .order("inicio", { ascending: true, nullsFirst: false })
       .limit(2000);
     if (error) notificar(error.message, "error");
+    const [{ data: ts }, { data: at }] = await Promise.all([
+      supabase.from("tareas_planificadas").select("*").eq("empresa_id", empresaId).eq("estado", "pendiente").gte("fecha", desde).lte("fecha", hasta).order("fecha").order("hora", { nullsFirst: false }).limit(1000),
+      supabase.from("tareas_planificadas").select("*").eq("empresa_id", empresaId).eq("estado", "pendiente").lt("fecha", hoyISO()).order("fecha").limit(100),
+    ]);
+    setTareas(ts || []);
+    setAtrasadas(at || []);
     // aplicaciones y riegos_parte son 1 a 1: PostgREST puede devolverlos como objeto
     setPartes(
       (data || []).map((x) => ({
@@ -121,6 +133,20 @@ export default function Calendario() {
       ),
     [partes, filtroTrab, filtroLabor, filtroRecinto]
   );
+
+  const pasaTarea = useCallback(
+    (t) =>
+      (filtroTrab === "todos" || (filtroTrab === "sin" ? !t.trabajador_ids?.length : t.trabajador_ids?.includes(filtroTrab))) &&
+      (!filtroLabor || t.labor_id === filtroLabor) &&
+      (!filtroRecinto || t.recinto_ids?.includes(filtroRecinto)),
+    [filtroTrab, filtroLabor, filtroRecinto]
+  );
+  const tareasPorDia = useMemo(() => {
+    const m = {};
+    for (const t of tareas.filter(pasaTarea)) (m[t.fecha] = m[t.fecha] || []).push(t);
+    return m;
+  }, [tareas, pasaTarea]);
+  const atrasadasF = atrasadas.filter(pasaTarea);
 
   const porDia = useMemo(() => {
     const m = {};
@@ -163,6 +189,97 @@ export default function Calendario() {
   const titulo =
     vista === "mes" ? nombreMes(ref) : vista === "semana" ? `${corta(desde)} – ${corta(hasta)} ${aFecha(hasta).getFullYear()}` : fechaLarga(ref);
 
+  const puedeHacer = (t) => puedePlanificar || !t.trabajador_ids?.length || (yo && t.trabajador_ids.includes(yo.id));
+  function nuevaTarea() {
+    const f = vista === "dia" ? ref : ref > hoy ? ref : sumar(hoy, 1);
+    setRepetir({ cada: "", veces: 4 });
+    setHojaTarea({ modo: "nueva", tarea: { fecha: f, recinto_ids: [], trabajador_ids: [], datos: {} } });
+  }
+  async function guardarTarea(payload) {
+    const t = hojaTarea.tarea;
+    let hora = null;
+    let horas = payload.horas_totales ?? null;
+    if (payload.inicio) {
+      const d = new Date(payload.inicio);
+      hora = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+      if (payload.fin) horas = Math.round(((new Date(payload.fin) - d) / 3600000) * 100) / 100;
+    }
+    const fila = {
+      empresa_id: empresaId,
+      fecha: payload.fecha,
+      hora,
+      labor_id: payload.labor_id,
+      recinto_ids: payload.recinto_ids || [],
+      trabajador_ids: payload.trabajador_ids || [],
+      notas: payload.observaciones || null,
+      datos: { maquinaria_ids: payload.maquinaria_ids || [], apero_ids: payload.apero_ids || [], aplicacion: payload.aplicacion || null, riego: payload.riego || null, horas },
+    };
+    setGuardando(true);
+    try {
+      let error;
+      if (hojaTarea.modo === "editar") ({ error } = await supabase.from("tareas_planificadas").update(fila).eq("id", t.id));
+      else {
+        const n = repetir.cada ? Math.min(Math.max(Number(repetir.veces) || 1, 1), 52) : 1;
+        const grupo = n > 1 ? crypto.randomUUID() : null;
+        const filas = Array.from({ length: n }, (_, i) => ({
+          ...fila,
+          grupo_id: grupo,
+          fecha: repetir.cada === "mes" ? mismoDiaMes(fila.fecha, i) : sumar(fila.fecha, i * (repetir.cada === "2semanas" ? 14 : 7)),
+        }));
+        ({ error } = await supabase.from("tareas_planificadas").insert(filas));
+        if (!error) notificar(n > 1 ? `${n} tareas planificadas ✓` : "Tarea planificada ✓");
+      }
+      if (error) throw new Error(error.message);
+      if (hojaTarea.modo === "editar") notificar("Tarea cambiada ✓");
+      setHojaTarea(null);
+      cargar();
+    } catch (e) {
+      notificar(e.message, "error");
+    } finally {
+      setGuardando(false);
+    }
+  }
+  async function marcarHecha(payload) {
+    const t = hojaTarea.tarea;
+    setGuardando(true);
+    try {
+      const r = await guardarParte({ ...payload, empresa_id: empresaId, estado: esGestor ? "validado" : "pendiente" });
+      const { error } = await supabase.rpc("completar_tarea", { p_tarea: t.id, p_parte: r.id || null });
+      if (error) throw new Error(error.message);
+      notificar(r.enCola ? "Parte guardado en el móvil; la tarea queda hecha ✓" : esGestor ? "Tarea hecha y parte guardado ✓" : "Tarea hecha. Parte enviado al encargado ✓");
+      setHojaTarea(null);
+      cargar();
+    } catch (e) {
+      notificar(e.message, "error");
+    } finally {
+      setGuardando(false);
+    }
+  }
+  async function cancelarTarea(t) {
+    if (!confirm("¿Quitar esta tarea del calendario?")) return;
+    let q = supabase.from("tareas_planificadas").update({ estado: "cancelada" });
+    if (t.grupo_id && confirm("Esta tarea se repite. ¿Quitar también las siguientes repeticiones?")) q = q.eq("grupo_id", t.grupo_id).eq("estado", "pendiente").gte("fecha", t.fecha);
+    else q = q.eq("id", t.id);
+    const { error } = await q;
+    if (error) return notificar(error.message, "error");
+    notificar("Tarea quitada");
+    setHojaTarea(null);
+    cargar();
+  }
+  const inicialDeTarea = (t, fecha) => ({
+    labor_id: t.labor_id,
+    fecha: fecha || t.fecha,
+    hora_inicio: t.hora ? t.hora.slice(0, 5) : "",
+    horas: t.datos?.horas ?? "",
+    recinto_ids: t.recinto_ids || [],
+    trabajador_ids: t.trabajador_ids || [],
+    maquinaria_ids: t.datos?.maquinaria_ids || [],
+    apero_ids: t.datos?.apero_ids || [],
+    observaciones: t.notas || "",
+    aplicacion: t.datos?.aplicacion || undefined,
+    riego: t.datos?.riego || undefined,
+  });
+
   async function guardarEdicion(payload) {
     setGuardando(true);
     try {
@@ -179,7 +296,17 @@ export default function Calendario() {
   }
 
   return (
-    <Pagina titulo="Calendario" subtitulo="Qué se ha hecho cada día, quién y dónde" volver="/mas">
+    <Pagina titulo="Calendario" subtitulo="Lo hecho y lo que hay que hacer" volver="/mas">
+      {puedePlanificar && (
+        <Boton className="mb-3 w-full" onClick={nuevaTarea}>
+          📌 Planificar tarea
+        </Boton>
+      )}
+      {atrasadasF.length > 0 && (
+        <button type="button" onClick={() => setHojaTarea({ modo: "atrasadas" })} className="mb-3 w-full rounded-2xl border-2 border-red-200 bg-red-50 px-4 py-3 text-left font-bold text-red-800">
+          ⚠️ {atrasadasF.length} tarea(s) planificada(s) sin hacer de días pasados ›
+        </button>
+      )}
       {/* Vista */}
       <div className="mb-3 grid grid-cols-3 gap-1 rounded-2xl bg-white p-1 shadow-sm">
         {[["mes", "Mes"], ["semana", "Semana"], ["dia", "Día"]].map(([k, t]) => (
@@ -236,7 +363,7 @@ export default function Calendario() {
         <Cargando />
       ) : (
         <>
-          {vista === "mes" && <VistaMes ref_={ref} desde={desde} hasta={hasta} hoy={hoy} porDia={porDia} nomLabor={nomLabor} horasDe={horasDe} onDia={abrirDia} />}
+          {vista === "mes" && <VistaMes ref_={ref} desde={desde} hasta={hasta} hoy={hoy} porDia={porDia} tareasPorDia={tareasPorDia} nomLabor={nomLabor} horasDe={horasDe} onDia={abrirDia} />}
           {vista === "semana" && (
             <div className="space-y-3">
               {Array.from({ length: 7 }, (_, i) => sumar(desde, i)).map((f) => (
@@ -250,9 +377,12 @@ export default function Calendario() {
                       {porDia[f]?.length ? `${porDia[f].length} · ${num(porDia[f].reduce((s, p) => s + horasDe(p), 0), 1)} h ›` : ""}
                     </span>
                   </button>
-                  {porDia[f]?.length ? (
+                  {porDia[f]?.length || tareasPorDia[f]?.length ? (
                     <div className="space-y-1.5">
-                      {porDia[f].map((p) => (
+                      {(tareasPorDia[f] || []).map((t) => (
+                        <TarjetaTarea key={t.id} t={t} hoy={hoy} compacta {...{ nomLabor, nomTrab, recintos }} onClick={() => setHojaTarea({ modo: "ver", tarea: t })} />
+                      ))}
+                      {(porDia[f] || []).map((p) => (
                         <TarjetaParte key={p.id} p={p} compacta {...{ nomLabor, nomTrab, recintos, horasDe }} onClick={() => setDetalle(p)} />
                       ))}
                     </div>
@@ -264,19 +394,38 @@ export default function Calendario() {
             </div>
           )}
           {vista === "dia" &&
-            (porDia[ref]?.length ? (
+            (porDia[ref]?.length || tareasPorDia[ref]?.length ? (
               <div className="space-y-2">
-                {porDia[ref].map((p) => (
+                {(tareasPorDia[ref] || []).map((t) => (
+                  <TarjetaTarea key={t.id} t={t} hoy={hoy} {...{ nomLabor, nomTrab, recintos }} onClick={() => setHojaTarea({ modo: "ver", tarea: t })} />
+                ))}
+                {(porDia[ref] || []).map((p) => (
                   <TarjetaParte key={p.id} p={p} {...{ nomLabor, nomTrab, recintos, horasDe }} onClick={() => setDetalle(p)} />
                 ))}
               </div>
             ) : (
-              <Vacio icono="📅" titulo="Sin trabajos este día" texto={filtroTrab !== "todos" || filtroLabor || filtroRecinto ? "Prueba a quitar los filtros." : "No hay partes registrados."}>
-                <Boton href="/trabajo">Registrar trabajo</Boton>
+              <Vacio icono="📅" titulo="Nada este día" texto={filtroTrab !== "todos" || filtroLabor || filtroRecinto ? "Prueba a quitar los filtros." : "No hay partes registrados."}>
+                <div className="flex flex-col gap-2">
+                  {ref <= hoy && <Boton href="/trabajo">Registrar trabajo</Boton>}
+                  {puedePlanificar && ref >= hoy && (
+                    <Boton variante="secundario" onClick={nuevaTarea}>
+                      📌 Planificar tarea
+                    </Boton>
+                  )}
+                </div>
               </Vacio>
             ))}
 
           {/* Resumen */}
+          {(() => {
+            const [a, b] = vista === "mes" ? [primeroDeMes(ref), sumar(sumarMeses(ref, 1), -1)] : [desde, hasta];
+            const n = tareas.filter(pasaTarea).filter((t) => t.fecha >= a && t.fecha <= b).length;
+            return n ? (
+              <p className="mt-4 rounded-2xl border-2 border-dashed border-olivo-200 bg-white px-4 py-3 text-[15px] text-olivo-900">
+                📌 <b>{n}</b> tarea(s) planificada(s) pendientes {vista === "mes" ? "este mes" : vista === "semana" ? "esta semana" : "este día"}
+              </p>
+            ) : null;
+          })()}
           {resumen.n > 0 && (
             <div className="mt-5 rounded-2xl bg-white p-4 shadow-sm">
               <p className="mb-2 text-sm font-bold uppercase text-stone-500">
@@ -363,11 +512,182 @@ export default function Calendario() {
           />
         )}
       </Hoja>
+      <Hoja
+        abierta={!!hojaTarea}
+        onCerrar={() => setHojaTarea(null)}
+        titulo={
+          hojaTarea?.modo === "nueva"
+            ? "Planificar tarea"
+            : hojaTarea?.modo === "editar"
+            ? "Cambiar tarea"
+            : hojaTarea?.modo === "hecha"
+            ? "Apuntar como hecha"
+            : hojaTarea?.modo === "atrasadas"
+            ? "Tareas sin hacer"
+            : `📌 ${nomLabor(hojaTarea?.tarea?.labor_id)}`
+        }
+      >
+        {hojaTarea?.modo === "atrasadas" && (
+          <div className="space-y-2">
+            <p className="text-[15px] text-stone-600">Planificadas para días que ya han pasado. Ábrelas para apuntarlas como hechas, cambiarlas de día o quitarlas.</p>
+            {atrasadasF.map((t) => (
+              <TarjetaTarea key={t.id} t={t} hoy={hoy} conFecha {...{ nomLabor, nomTrab, recintos }} onClick={() => setHojaTarea({ modo: "ver", tarea: t })} />
+            ))}
+          </div>
+        )}
+        {hojaTarea?.modo === "ver" && (
+          <DetalleTarea t={hojaTarea.tarea} hoy={hoy} {...{ nomTrab, recintos, maquinaria, aperos, productos }}>
+            <div className="mt-4 flex flex-col gap-2">
+              {puedeHacer(hojaTarea.tarea) && (
+                <Boton onClick={() => setHojaTarea({ ...hojaTarea, modo: "hecha" })}>✅ Ya está hecha: apuntar el parte</Boton>
+              )}
+              {puedePlanificar && (
+                <Boton variante="secundario" onClick={() => setHojaTarea({ ...hojaTarea, modo: "editar" })}>
+                  ✏️ Cambiar o mover de día
+                </Boton>
+              )}
+              {puedePlanificar && (
+                <Boton variante="peligro" onClick={() => cancelarTarea(hojaTarea.tarea)}>
+                  Quitar tarea
+                </Boton>
+              )}
+            </div>
+          </DetalleTarea>
+        )}
+        {(hojaTarea?.modo === "nueva" || hojaTarea?.modo === "editar") && (
+          <>
+            {hojaTarea.modo === "nueva" && (
+              <div className="mb-4 rounded-2xl bg-olivo-50 p-3">
+                <p className="mb-2 text-sm font-bold text-olivo-900">¿Se repite?</p>
+                <div className="flex flex-wrap gap-2">
+                  {[["", "No"], ["semana", "Cada semana"], ["2semanas", "Cada 2 semanas"], ["mes", "Cada mes"]].map(([k, t]) => (
+                    <button key={k} type="button" onClick={() => setRepetir({ ...repetir, cada: k })} className={`rounded-full px-3 py-1.5 text-sm font-bold ${repetir.cada === k ? "bg-olivo-700 text-white" : "bg-white text-stone-700"}`}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+                {repetir.cada && (
+                  <label className="mt-2 flex items-center gap-2 text-[15px]">
+                    Número de veces:
+                    <input type="number" min="2" max="52" value={repetir.veces} onChange={(e) => setRepetir({ ...repetir, veces: e.target.value })} className="h-10 w-20 rounded-xl border border-stone-300 px-2" />
+                  </label>
+                )}
+              </div>
+            )}
+            <ParteEditor
+              key={hojaTarea.modo + (hojaTarea.tarea.id || "")}
+              modo="completo"
+              inicial={inicialDeTarea(hojaTarea.tarea)}
+              planificar
+              textoGuardar={hojaTarea.modo === "editar" ? "Guardar cambios" : "📌 Guardar en el calendario"}
+              guardando={guardando}
+              onGuardar={guardarTarea}
+            />
+          </>
+        )}
+        {hojaTarea?.modo === "hecha" && (
+          <>
+            <p className="mb-3 rounded-2xl bg-olivo-50 p-3 text-[15px] text-olivo-900">Revisa lo que se hizo de verdad (fecha, horas, dosis…) y guarda. Se creará el parte y la tarea quedará hecha.</p>
+            <ParteEditor
+              key={"hecha" + hojaTarea.tarea.id}
+              modo="completo"
+              inicial={inicialDeTarea(hojaTarea.tarea, hojaTarea.tarea.fecha < hoy ? hojaTarea.tarea.fecha : hoy)}
+              textoGuardar="✅ Guardar parte"
+              guardando={guardando}
+              onGuardar={marcarHecha}
+            />
+          </>
+        )}
+      </Hoja>
     </Pagina>
   );
 }
 
-function VistaMes({ ref_, desde, hasta, hoy, porDia, nomLabor, horasDe, onDia }) {
+function mismoDiaMes(s, n) {
+  const d = aFecha(s);
+  const dia = d.getDate();
+  const x = new Date(d.getFullYear(), d.getMonth() + n, 1, 12);
+  const ultimo = new Date(x.getFullYear(), x.getMonth() + 1, 0).getDate();
+  x.setDate(Math.min(dia, ultimo));
+  return aISO(x);
+}
+
+function TarjetaTarea({ t, hoy, compacta, conFecha, nomLabor, nomTrab, recintos, onClick }) {
+  const rs = recintos.filter((r) => t.recinto_ids?.includes(r.id));
+  const atrasada = t.fecha < hoy;
+  const col = colorDe(t.labor_id);
+  return (
+    <button type="button" onClick={onClick} className="flex w-full overflow-hidden rounded-2xl border-2 border-dashed bg-white text-left active:bg-stone-50" style={{ borderColor: col + "88" }}>
+      <span className={`flex-1 ${compacta ? "p-2.5" : "p-3"}`}>
+        <span className="flex items-start justify-between gap-2">
+          <span className={`${compacta ? "text-[15px]" : "text-lg"} font-extrabold text-olivo-900`}>
+            📌 {nomLabor(t.labor_id)}
+            {t.hora ? <span className="ml-1 text-sm font-normal text-stone-500">{t.hora.slice(0, 5)}</span> : null}
+          </span>
+          <Etiqueta color={atrasada ? "rojo" : "gris"}>{atrasada ? "Sin hacer" : "Planificada"}</Etiqueta>
+        </span>
+        {conFecha && <span className="block text-sm font-bold text-red-700">{fechaLarga(t.fecha)}</span>}
+        <span className="block text-[15px] text-stone-700">{rs.map((r) => nombreRecinto(r, r.n_en_parcela)).join(", ") || "Sin parcela"}</span>
+        <span className="mt-0.5 block text-sm text-stone-500">
+          {[
+            t.datos?.horas ? `${num(t.datos.horas, 1)} h previstas` : null,
+            t.trabajador_ids?.length ? `👤 ${t.trabajador_ids.map(nomTrab).join(", ")}` : "Sin asignar",
+            t.datos?.aplicacion?.productos?.length ? "🧴" : null,
+            t.grupo_id ? "🔁" : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function DetalleTarea({ t, hoy, nomTrab, recintos, maquinaria, aperos, productos, children }) {
+  const rs = recintos.filter((r) => t.recinto_ids?.includes(r.id));
+  const ms = maquinaria.filter((m) => t.datos?.maquinaria_ids?.includes(m.id));
+  const as = aperos.filter((a) => t.datos?.apero_ids?.includes(a.id));
+  const ap = t.datos?.aplicacion;
+  const rg = t.datos?.riego;
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap gap-2">
+        <Etiqueta color={t.fecha < hoy ? "rojo" : "gris"}>{t.fecha < hoy ? "Sin hacer" : "Planificada"}</Etiqueta>
+        {t.grupo_id && <Etiqueta color="gris">🔁 Se repite</Etiqueta>}
+      </div>
+      <Fila k="Para el día">
+        {fechaLarga(t.fecha)}
+        {t.hora ? ` · ${t.hora.slice(0, 5)}` : ""}
+      </Fila>
+      <Fila k="Horas previstas">{t.datos?.horas ? `${num(t.datos.horas, 2)} h` : null}</Fila>
+      <Fila k="Parcelas">{rs.length ? rs.map((r) => <p key={r.id}>{nombreRecinto(r, r.n_en_parcela)}</p>) : null}</Fila>
+      <Fila k="Quién">{t.trabajador_ids?.length ? t.trabajador_ids.map(nomTrab).join(", ") : "Sin asignar"}</Fila>
+      <Fila k="Maquinaria">{ms.length ? ms.map((m) => m.nombre).join(", ") : null}</Fila>
+      <Fila k="Aperos">{as.length ? as.map((a) => a.nombre).join(", ") : null}</Fila>
+      {ap?.productos?.length > 0 && (
+        <Fila k="Productos previstos">
+          {ap.plaga_o_motivo && <p>Motivo: {ap.plaga_o_motivo}</p>}
+          {ap.productos.map((x, i) => (
+            <p key={i} className="font-semibold">
+              🧴 {productos.find((pr) => pr.id === x.producto_id)?.nombre || "Producto"} · {num(x.dosis_ha, 3)} {x.unidad_dosis || ""}
+            </p>
+          ))}
+        </Fila>
+      )}
+      {rg && (
+        <Fila k="Riego previsto">
+          {rg.m3_ha != null ? `${num(rg.m3_ha, 1)} m³/ha` : ""}
+          {rg.volumen_m3 != null ? `${num(rg.volumen_m3, 1)} m³ en total` : ""}
+          {rg.sistema ? ` · ${rg.sistema}` : ""}
+        </Fila>
+      )}
+      <Fila k="Notas">{t.notas || null}</Fila>
+      {children}
+    </div>
+  );
+}
+
+function VistaMes({ ref_, desde, hasta, hoy, porDia, tareasPorDia, nomLabor, horasDe, onDia }) {
   const dias = [];
   for (let f = desde; f <= hasta; f = sumar(f, 1)) dias.push(f);
   const mes = ref_.slice(0, 7);
@@ -381,6 +701,8 @@ function VistaMes({ ref_, desde, hasta, hoy, porDia, nomLabor, horasDe, onDia })
       <div className="grid grid-cols-7 gap-1">
         {dias.map((f) => {
           const lista = porDia[f] || [];
+          const plan = tareasPorDia[f] || [];
+          const visibles = [...lista.map((p) => ({ p })), ...plan.map((t) => ({ t }))];
           const fuera = f.slice(0, 7) !== mes;
           const h = lista.reduce((s, p) => s + horasDe(p), 0);
           return (
@@ -389,16 +711,22 @@ function VistaMes({ ref_, desde, hasta, hoy, porDia, nomLabor, horasDe, onDia })
               type="button"
               onClick={() => onDia(f)}
               className={`flex min-h-[4.5rem] flex-col items-stretch rounded-lg p-1 text-left ${f === hoy ? "ring-2 ring-olivo-600" : ""} ${
-                lista.length ? "bg-olivo-50 active:bg-olivo-100" : "active:bg-stone-50"
+                lista.length ? "bg-olivo-50 active:bg-olivo-100" : plan.length ? "bg-white active:bg-stone-50" : "active:bg-stone-50"
               } ${fuera ? "opacity-40" : ""}`}
             >
               <span className={`text-sm font-bold ${f === hoy ? "text-olivo-700" : "text-stone-700"}`}>{Number(f.slice(8))}</span>
-              {lista.slice(0, 2).map((p) => (
-                <span key={p.id} className="mt-0.5 truncate rounded px-0.5 text-[10px] font-bold leading-tight text-white" style={{ background: colorDe(p.labor_id) }}>
-                  {nomLabor(p.labor_id)}
-                </span>
-              ))}
-              {lista.length > 2 && <span className="text-[10px] font-bold text-stone-500">+{lista.length - 2} más</span>}
+              {visibles.slice(0, 2).map(({ p, t }) =>
+                p ? (
+                  <span key={p.id} className="mt-0.5 truncate rounded px-0.5 text-[10px] font-bold leading-tight text-white" style={{ background: colorDe(p.labor_id) }}>
+                    {nomLabor(p.labor_id)}
+                  </span>
+                ) : (
+                  <span key={t.id} className="mt-0.5 truncate rounded border border-dashed bg-white px-0.5 text-[10px] font-bold leading-tight" style={{ borderColor: colorDe(t.labor_id), color: f < hoy ? "#b91c1c" : colorDe(t.labor_id) }}>
+                    📌{nomLabor(t.labor_id)}
+                  </span>
+                )
+              )}
+              {visibles.length > 2 && <span className="text-[10px] font-bold text-stone-500">+{visibles.length - 2} más</span>}
               {h > 0 && <span className="mt-auto text-right text-[10px] text-stone-500">{num(h, 1)} h</span>}
             </button>
           );

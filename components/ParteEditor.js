@@ -30,12 +30,12 @@ export function habitualesDe(labor) {
  * Tarjeta de confirmación/edición de un parte.
  * modo "iniciar": sin horas (el trabajo empieza ahora). modo "completo": fecha + horas.
  */
-export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar, onCancelar, textoGuardar = "Guardar", guardando }) {
+export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar, onCancelar, textoGuardar = "Guardar", guardando, planificar = false }) {
   const { labores, recintos, maquinaria, aperos, trabajadores, productos, esGestor, deteccion, perfil, cultivos, online } = useApp();
   const yo = trabajadores.find((t) => t.usuario_id === perfil?.id);
 
   const [laborId, setLaborId] = useState(inicial.labor_id || null);
-  const [recintoIds, setRecintoIdsRaw] = useState(inicial.recinto_ids?.length ? inicial.recinto_ids : deteccion?.recinto ? [deteccion.recinto.id] : []);
+  const [recintoIds, setRecintoIdsRaw] = useState(inicial.recinto_ids?.length ? inicial.recinto_ids : !planificar && deteccion?.recinto ? [deteccion.recinto.id] : []);
   const tocado = useRef(false);
   const setRecintoIds = (v) => {
     tocado.current = true;
@@ -43,11 +43,11 @@ export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar
   };
   // El GPS suele llegar después de pintar: si el usuario aún no ha elegido, marca la parcela detectada
   useEffect(() => {
-    if (!tocado.current && deteccion?.recinto && recintoIds.length === 0) setRecintoIdsRaw([deteccion.recinto.id]);
+    if (!planificar && !tocado.current && deteccion?.recinto && recintoIds.length === 0) setRecintoIdsRaw([deteccion.recinto.id]);
   }, [deteccion?.recinto?.id]); // eslint-disable-line
   const [maqIds, setMaqIds] = useState(inicial.maquinaria_ids || []);
   const [aperoIds, setAperoIds] = useState(inicial.apero_ids || []);
-  const [trabIds, setTrabIds] = useState(inicial.trabajador_ids?.length ? inicial.trabajador_ids : yo ? [yo.id] : []);
+  const [trabIds, setTrabIds] = useState(inicial.trabajador_ids?.length ? inicial.trabajador_ids : yo && !planificar ? [yo.id] : []);
   const [fecha, setFecha] = useState(inicial.fecha || hoyISO());
   const [horaInicio, setHoraInicio] = useState(inicial.hora_inicio || horaDe(inicial.inicio) || "");
   const [horas, setHoras] = useState(inicial.horas ?? inicial.horas_totales ?? "");
@@ -141,6 +141,7 @@ export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar
         payload.fin = new Date(ini.getTime() + horasNum * 3600000).toISOString();
       } else {
         payload.horas_totales = horasNum || null;
+        if (planificar && horaInicio) payload.inicio = new Date(`${fecha}T${horaInicio}:00`).toISOString();
       }
     }
     if (esAplicacion && prods.length) {
@@ -168,7 +169,7 @@ export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar
   const faltan = [];
   if (!laborId) faltan.push("la labor");
   if (!recintoIds.length) faltan.push("la parcela");
-  if (modo === "completo" && !horasNum) faltan.push("las horas");
+  if (modo === "completo" && !horasNum && !planificar) faltan.push("las horas");
 
   return (
     <div className="space-y-5">
@@ -328,10 +329,10 @@ export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar
           <Campo etiqueta="Día">
             <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
           </Campo>
-          <Campo etiqueta="Empezó">
+          <Campo etiqueta={planificar ? "Hora" : "Empezó"}>
             <Input type="time" value={horaInicio} onChange={(e) => setHoraInicio(e.target.value)} />
           </Campo>
-          <Campo etiqueta="Horas">
+          <Campo etiqueta={planificar ? "Horas prev." : "Horas"}>
             <div className="flex">
               <Input inputMode="decimal" value={horas} onChange={(e) => setHoras(e.target.value)} placeholder="0" className="text-center" />
             </div>
