@@ -4,6 +4,7 @@ import { useApp } from "./AppProvider";
 import { Boton, Campo, Fichas, Input, claseInput } from "./ui";
 import { euros, hoyISO, nombreRecinto, num } from "@/lib/formato";
 import ComprobacionFito from "./ComprobacionFito";
+import MateriasRecomendadas from "./MateriasRecomendadas";
 
 const SISTEMAS_RIEGO = [["goteo", "Goteo"], ["aspersion", "Aspersión"], ["microaspersion", "Microaspersión"], ["gravedad", "A manta / gravedad"], ["pivot", "Pívot"], ["otro", "Otro"]];
 
@@ -30,7 +31,7 @@ export function habitualesDe(labor) {
  * Tarjeta de confirmación/edición de un parte.
  * modo "iniciar": sin horas (el trabajo empieza ahora). modo "completo": fecha + horas.
  */
-export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar, onCancelar, textoGuardar = "Guardar", guardando, planificar = false }) {
+export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar, onCancelar, textoGuardar = "Guardar", guardando, planificar = false, soloMaterias = false, materias = [], onMaterias, ufs = {}, onUfs }) {
   const { labores, recintos, maquinaria, aperos, trabajadores, productos, esGestor, deteccion, perfil, cultivos, online } = useApp();
   const yo = trabajadores.find((t) => t.usuario_id === perfil?.id);
 
@@ -195,7 +196,36 @@ export default function ParteEditor({ inicial = {}, modo = "completo", onGuardar
         )}
       </div>
 
-      {esAplicacion && (
+      {esAplicacion && soloMaterias && labor.categoria !== "fertilizacion" && (
+        <MateriasRecomendadas
+          valor={materias}
+          onCambio={onMaterias}
+          online={online}
+          grupos={Object.values(
+            Object.fromEntries(
+              recintos
+                .filter((r) => recintoIds.includes(r.id))
+                .map((r) => cultivos.find((c) => c.id === r.cultivo_id))
+                .filter((c) => c?.codigo_mapa)
+                .map((c) => [c.codigo_mapa, { codigo: c.codigo_mapa, cultivo: c.nombre }])
+            )
+          )}
+        />
+      )}
+      {esAplicacion && soloMaterias && labor.categoria === "fertilizacion" && (
+        <div className="rounded-2xl border-2 border-tierra-100 bg-tierra-50 p-3">
+          <p className="text-sm font-bold text-tierra-700">🌾 Unidades fertilizantes recomendadas</p>
+          <p className="mb-2 text-xs text-tierra-700">El agricultor elegirá el abono comercial que tenga o compre.</p>
+          <div className="grid grid-cols-3 gap-2">
+            {[["n", "N"], ["p", "P₂O₅"], ["k", "K₂O"]].map(([k, t]) => (
+              <Campo key={k} etiqueta={`${t} kg/ha`}>
+                <input inputMode="decimal" className={`${claseInput} text-right`} value={ufs?.[k] ?? ""} placeholder="0" onChange={(e) => onUfs?.({ ...ufs, [k]: e.target.value })} />
+              </Campo>
+            ))}
+          </div>
+        </div>
+      )}
+      {esAplicacion && !soloMaterias && (
         <div className="rounded-2xl border-2 border-tierra-100 bg-tierra-50 p-3">
           <p className="mb-2 text-sm font-bold text-tierra-700">Productos aplicados</p>
           <Fichas

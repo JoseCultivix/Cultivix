@@ -56,7 +56,10 @@ function rango(vista, ref) {
 }
 
 export default function Calendario() {
-  const { empresaId, esGestor, rol, perfil, labores, recintos, trabajadores, maquinaria, aperos, productos, notificar } = useApp();
+  const { empresaId, esGestor, rol, perfil, labores, recintos, trabajadores, maquinaria, aperos, productos, cultivos, notificar } = useApp();
+  const [materias, setMaterias] = useState([]);
+  const [ufs, setUfs] = useState({});
+  const [prodsHecha, setProdsHecha] = useState([]);
   const puedePlanificar = esGestor || rol === "tecnico";
   const yo = trabajadores.find((t) => t.usuario_id === perfil?.id);
   const [tareas, setTareas] = useState([]);
@@ -78,6 +81,8 @@ export default function Calendario() {
   useEffect(() => {
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("nueva") === "1" && puedePlanificar) {
       window.history.replaceState(window.history.state, "", "/calendario");
+      setMaterias([]);
+      setUfs({});
       setHojaTarea({ modo: "nueva", tarea: { fecha: sumar(hoyISO(), 1), recinto_ids: [], trabajador_ids: [], datos: {} } });
     }
   }, [puedePlanificar]);
@@ -211,6 +216,8 @@ export default function Calendario() {
   function nuevaTarea() {
     const f = vista === "dia" ? ref : ref > hoy ? ref : sumar(hoy, 1);
     setRepetir({ cada: "", veces: 4 });
+    setMaterias([]);
+    setUfs({});
     setHojaTarea({ modo: "nueva", tarea: { fecha: f, recinto_ids: [], trabajador_ids: [], datos: {} } });
   }
   async function guardarTarea(payload) {
@@ -230,7 +237,15 @@ export default function Calendario() {
       recinto_ids: payload.recinto_ids || [],
       trabajador_ids: payload.trabajador_ids || [],
       notas: payload.observaciones || null,
-      datos: { maquinaria_ids: payload.maquinaria_ids || [], apero_ids: payload.apero_ids || [], aplicacion: payload.aplicacion || null, riego: payload.riego || null, horas },
+      datos: {
+        maquinaria_ids: payload.maquinaria_ids || [],
+        apero_ids: payload.apero_ids || [],
+        aplicacion: payload.aplicacion || null,
+        riego: payload.riego || null,
+        horas,
+        materias: materias.length ? materias : undefined,
+        ufs: Object.values(ufs).some((v) => v !== "" && v != null) ? ufs : undefined,
+      },
     };
     setGuardando(true);
     try {
@@ -289,6 +304,22 @@ export default function Calendario() {
     const base = inicialBase(t, fecha);
     if (a?.rol === "tecnico" && base.aplicacion && !base.aplicacion.justificacion)
       base.aplicacion = { ...base.aplicacion, justificacion: `Recomendado por ${a.nombre || "el técnico"} (técnico/asesor)` };
+    return base;
+  };
+  // Al convertir en parte: los productos comerciales elegidos y la recomendación del técnico como justificación
+  const inicialHecha = (t, fecha) => {
+    const base = inicialDeTarea(t, fecha);
+    const ms = t.datos?.materias || [];
+    if (!prodsHecha.length && !ms.length) return base;
+    const a = autorDe(t);
+    const quien = a?.rol === "tecnico" ? `${a.nombre || "el técnico"} (técnico/asesor)` : a?.nombre || "";
+    const rec = ms.map((m) => `${m.materia}${m.agente ? ` para ${m.agente}` : ""}`).join("; ");
+    base.aplicacion = {
+      ...(base.aplicacion || {}),
+      plaga_o_motivo: base.aplicacion?.plaga_o_motivo || [...new Set(ms.map((m) => m.agente).filter(Boolean))].join(", ") || null,
+      justificacion: base.aplicacion?.justificacion?.startsWith("Recomendado") || !base.aplicacion?.justificacion ? `Recomendado por ${quien}${rec ? `: ${rec}` : ""}` : base.aplicacion.justificacion,
+      productos: [...(base.aplicacion?.productos || []), ...prodsHecha.filter((x) => !(base.aplicacion?.productos || []).some((y) => y.producto_id === x.producto_id))],
+    };
     return base;
   };
   const inicialBase = (t, fecha) => ({
@@ -564,10 +595,24 @@ export default function Calendario() {
           <DetalleTarea t={hojaTarea.tarea} hoy={hoy} autor={autorDe(hojaTarea.tarea)} {...{ nomTrab, recintos, maquinaria, aperos, productos }}>
             <div className="mt-4 flex flex-col gap-2">
               {puedeHacer(hojaTarea.tarea) && (
-                <Boton onClick={() => setHojaTarea({ ...hojaTarea, modo: "hecha" })}>✅ Ya está hecha: apuntar el parte</Boton>
+                <Boton
+                  onClick={() => {
+                    setProdsHecha([]);
+                    setHojaTarea({ ...hojaTarea, modo: "hecha" });
+                  }}
+                >
+                  ✅ Ya está hecha: apuntar el parte
+                </Boton>
               )}
               {puedePlanificar && (
-                <Boton variante="secundario" onClick={() => setHojaTarea({ ...hojaTarea, modo: "editar" })}>
+                <Boton
+                  variante="secundario"
+                  onClick={() => {
+                    setMaterias(hojaTarea.tarea.datos?.materias || []);
+                    setUfs(hojaTarea.tarea.datos?.ufs || {});
+                    setHojaTarea({ ...hojaTarea, modo: "editar" });
+                  }}
+                >
                   ✏️ Cambiar o mover de día
                 </Boton>
               )}
@@ -609,6 +654,11 @@ export default function Calendario() {
               modo="completo"
               inicial={inicialDeTarea(hojaTarea.tarea)}
               planificar
+              soloMaterias={rol === "tecnico" || !!hojaTarea.tarea.datos?.materias?.length || !!hojaTarea.tarea.datos?.ufs}
+              materias={materias}
+              onMaterias={setMaterias}
+              ufs={ufs}
+              onUfs={setUfs}
               textoGuardar={hojaTarea.modo === "editar" ? "Guardar cambios" : "📌 Guardar en el calendario"}
               guardando={guardando}
               onGuardar={guardarTarea}
@@ -618,10 +668,20 @@ export default function Calendario() {
         {hojaTarea?.modo === "hecha" && (
           <>
             <p className="mb-3 rounded-2xl bg-olivo-50 p-3 text-[15px] text-olivo-900">Revisa lo que se hizo de verdad (fecha, horas, dosis…) y guarda. Se creará el parte y la tarea quedará hecha.</p>
+            {(hojaTarea.tarea.datos?.materias?.length > 0 || hojaTarea.tarea.datos?.ufs) && (
+              <ElegirComercial
+                t={hojaTarea.tarea}
+                autor={autorDe(hojaTarea.tarea)}
+                productos={productos}
+                codigos={[...new Set(recintos.filter((r) => hojaTarea.tarea.recinto_ids?.includes(r.id)).map((r) => cultivos.find((c) => c.id === r.cultivo_id)?.codigo_mapa).filter(Boolean))]}
+                elegidos={prodsHecha}
+                onElegir={(p) => setProdsHecha(prodsHecha.some((x) => x.producto_id === p.id) ? prodsHecha.filter((x) => x.producto_id !== p.id) : [...prodsHecha, { producto_id: p.id, dosis_ha: p.dosis_habitual_ha ?? "", unidad_dosis: `${p.unidad || "kg"}/ha` }])}
+              />
+            )}
             <ParteEditor
-              key={"hecha" + hojaTarea.tarea.id}
+              key={"hecha" + hojaTarea.tarea.id + prodsHecha.map((x) => x.producto_id).join(",")}
               modo="completo"
-              inicial={inicialDeTarea(hojaTarea.tarea, hojaTarea.tarea.fecha < hoy ? hojaTarea.tarea.fecha : hoy)}
+              inicial={inicialHecha(hojaTarea.tarea, hojaTarea.tarea.fecha < hoy ? hojaTarea.tarea.fecha : hoy)}
               textoGuardar="✅ Guardar parte"
               guardando={guardando}
               onGuardar={marcarHecha}
@@ -630,6 +690,80 @@ export default function Calendario() {
         )}
       </Hoja>
     </Pagina>
+  );
+}
+
+const normal = (x) => (x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+const normReg = (x) => (x || "").replace(/[^0-9]/g, "").replace(/^0+/, "");
+
+function ElegirComercial({ t, autor, productos, codigos, elegidos, onElegir }) {
+  const ms = t.datos?.materias || [];
+  const [registro, setRegistro] = useState({}); // materia -> productos del Registro
+  const [abierto, setAbierto] = useState(null);
+  useEffect(() => {
+    if (!codigos.length) return;
+    ms.forEach(async (m) => {
+      const { data } = await supabase.rpc("fito_productos_materia", { p_materia: m.materia, p_codigos: codigos, p_agente: m.agente || null });
+      setRegistro((r) => ({ ...r, [m.materia]: data || [] }));
+    });
+  }, [t.id, codigos.join(",")]); // eslint-disable-line
+
+  return (
+    <div className="mb-4 rounded-2xl border-2 border-tierra-200 bg-tierra-50 p-3">
+      <p className="text-sm font-bold text-tierra-800">{autor?.rol === "tecnico" ? `🧑‍🌾 Recomendación de ${autor.nombre || "tu técnico"}` : "📌 Recomendación"}</p>
+      <p className="text-xs text-tierra-700">Elige primero el producto comercial que has usado; después revisa la dosis y las horas abajo.</p>
+      {t.datos?.ufs && (
+        <p className="mt-1 text-[15px] text-stone-800">
+          🌾 {[["n", "N"], ["p", "P₂O₅"], ["k", "K₂O"]].filter(([k]) => t.datos.ufs[k]).map(([k, n]) => `${n} ${t.datos.ufs[k]} kg/ha`).join(" · ")}. Elige abajo el abono que has usado.
+        </p>
+      )}
+      {ms.map((m) => {
+        const reg = registro[m.materia];
+        const regs = new Set((reg || []).map((x) => normReg(x.registro)));
+        const mios = productos.filter((p) => (p.numero_registro && regs.has(normReg(p.numero_registro))) || normal(p.materia_activa).includes(m.materia));
+        return (
+          <div key={m.materia} className="mt-2 rounded-xl bg-white p-2.5">
+            <p className="font-extrabold text-olivo-900">🧪 {m.materia}</p>
+            {m.agente && <p className="text-sm text-stone-700">Para: {m.agente}</p>}
+            {m.nota && <p className="text-sm text-stone-600">📝 {m.nota}</p>}
+            <p className="mb-1 mt-2 text-xs font-bold uppercase text-stone-500">Tus productos con esta materia activa</p>
+            {mios.length ? (
+              <div className="flex flex-wrap gap-2">
+                {mios.map((p) => {
+                  const sel = elegidos.some((x) => x.producto_id === p.id);
+                  return (
+                    <button key={p.id} type="button" onClick={() => onElegir(p)} className={`rounded-full px-3 py-1.5 text-sm font-bold ${sel ? "bg-olivo-700 text-white" : "bg-olivo-50 text-olivo-800"}`}>
+                      {sel ? "✓ " : "+ "}
+                      {p.nombre}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-stone-600">No tienes ninguno dado de alta. Mira abajo cuáles puedes comprar.</p>
+            )}
+            <button type="button" onClick={() => setAbierto(abierto === m.materia ? null : m.materia)} className="mt-2 text-sm font-bold text-tierra-700">
+              {abierto === m.materia ? "▾" : "▸"} Productos autorizados del Registro ({reg ? reg.length : "…"})
+            </button>
+            {abierto === m.materia && (
+              <div className="mt-1 max-h-60 space-y-1 overflow-y-auto">
+                {(reg || []).map((x) => (
+                  <div key={x.registro} className="rounded-lg bg-stone-50 px-2 py-1.5 text-sm">
+                    <b>{x.producto}</b> <span className="text-stone-500">· nº {x.registro}</span>
+                    <span className="block text-xs text-stone-600">
+                      {x.formulado}
+                      {x.dosis_max ? ` · dosis ${x.dosis_min ?? ""}–${x.dosis_max} ${x.unidad || ""}` : ""}
+                      {x.plazo_dias != null ? ` · plazo ${x.plazo_dias} días` : ""}
+                    </span>
+                  </div>
+                ))}
+                {reg && !reg.length && <p className="text-sm text-stone-500">Ninguno autorizado para este cultivo y plaga.</p>}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -697,6 +831,23 @@ function DetalleTarea({ t, hoy, autor, nomTrab, recintos, maquinaria, aperos, pr
       <Fila k="Quién">{t.trabajador_ids?.length ? t.trabajador_ids.map(nomTrab).join(", ") : "Sin asignar"}</Fila>
       <Fila k="Maquinaria">{ms.length ? ms.map((m) => m.nombre).join(", ") : null}</Fila>
       <Fila k="Aperos">{as.length ? as.map((a) => a.nombre).join(", ") : null}</Fila>
+      {t.datos?.materias?.length > 0 && (
+        <Fila k="🧪 Materias activas recomendadas">
+          {t.datos.materias.map((m, i) => (
+            <div key={i} className="mb-1">
+              <p className="font-bold">{m.materia}</p>
+              {m.agente && <p className="text-sm">Para: {m.agente}{m.cultivo ? ` (${m.cultivo})` : ""}</p>}
+              {m.plazo_max != null && <p className="text-xs text-stone-500">Plazo de seguridad según producto: hasta {m.plazo_max} días</p>}
+              {m.nota && <p className="text-sm text-stone-600">📝 {m.nota}</p>}
+            </div>
+          ))}
+        </Fila>
+      )}
+      {t.datos?.ufs && (
+        <Fila k="🌾 Unidades fertilizantes recomendadas">
+          {[["n", "N"], ["p", "P₂O₅"], ["k", "K₂O"]].filter(([k]) => t.datos.ufs[k]).map(([k, n]) => `${n} ${t.datos.ufs[k]} kg/ha`).join(" · ") || "—"}
+        </Fila>
+      )}
       {ap?.productos?.length > 0 && (
         <Fila k="Productos previstos">
           {ap.plaga_o_motivo && <p>Motivo: {ap.plaga_o_motivo}</p>}
