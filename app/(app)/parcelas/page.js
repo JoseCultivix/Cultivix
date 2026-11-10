@@ -1,7 +1,8 @@
 "use client";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { apiGet, supabase } from "@/lib/supabase";
+import { apiGet, apiPost, supabase } from "@/lib/supabase";
+import { comprimirImagen } from "@/lib/imagen";
 import { useApp } from "@/components/AppProvider";
 import { Boton, Campo, Etiqueta, Fichas, Hoja, Input, Pagina, Select, Tarjeta, Vacio } from "@/components/ui";
 import { bbox, centro } from "@/lib/geo";
@@ -169,6 +170,80 @@ function SelectorFinca({ fincas, fincaId, setFincaId, nueva, setNueva }) {
   );
 }
 
+// Crea (o completa) una parcela con recintos SIGPAC. Devuelve cuántos recintos se han guardado.
+const mismoRecinto = (e, r) => e.provincia_sigpac === r.provincia && e.municipio_sigpac === r.municipio && e.poligono_sigpac === r.poligono && e.parcela_sigpac === r.parcela && e.recinto_sigpac === r.recinto;
+async function guardarRecintosSigpac({ empresaId, elegidos, nombre, destino, fincaId, nuevaFinca, cultivoDe, existentes, campanas }) {
+  const yaEstan = elegidos.filter((r) => existentes.some((e) => mismoRecinto(e, r)));
+  if (yaEstan.length === elegidos.length) throw new Error("Esos recintos ya están en tus parcelas");
+  let parcelaId = destino || null;
+  if (!parcelaId) {
+    const fid = await obtenerFinca(empresaId, fincaId, nuevaFinca);
+    const c = centro(elegidos.find((r) => r.geometria)?.geometria);
+    const { data, error } = await supabase
+      .from("parcelas")
+      .insert({
+        empresa_id: empresaId,
+        finca_id: fid,
+        nombre: nombre?.trim() || "Parcela",
+        superficie_total_ha: elegidos.reduce((s, r) => s + (r.superficie || 0), 0),
+        latitud_centro: c?.lat,
+        longitud_centro: c?.lon,
+      })
+      .select("id")
+      .single();
+    if (error) throw error;
+    parcelaId = data.id;
+  }
+  // Si la parcela tenía un recinto provisional (sin SIGPAC), se completa en lugar de duplicar
+  const provisional = destino ? existentes.find((e) => e.parcela_id === destino && e.fuente === "manual" && e.recinto_sigpac == null) : null;
+  let usado = false;
+  let n = 0;
+  for (const r of elegidos) {
+    if (yaEstan.includes(r)) continue;
+    const b = bbox(r.geometria);
+    const c = centro(r.geometria);
+    const fila = {
+      empresa_id: empresaId,
+      parcela_id: parcelaId,
+      provincia_sigpac: r.provincia,
+      municipio_sigpac: r.municipio,
+      agregado_sigpac: r.agregado,
+      zona_sigpac: r.zona,
+      poligono_sigpac: r.poligono,
+      parcela_sigpac: r.parcela,
+      recinto_sigpac: r.recinto,
+      uso_sigpac: r.uso_sigpac,
+      superficie_sigpac_ha: r.superficie,
+      pendiente_media: r.pendiente_media,
+      coef_regadio: r.coef_regadio,
+      geometria: r.geometria,
+      bbox_min_lon: b?.minLon,
+      bbox_min_lat: b?.minLat,
+      bbox_max_lon: b?.maxLon,
+      bbox_max_lat: b?.maxLat,
+      centro_lat: c?.lat,
+      centro_lon: c?.lon,
+      fuente: "sigpac",
+      fecha_importacion: new Date().toISOString(),
+    };
+    let recId;
+    if (provisional && !usado) {
+      const { error } = await supabase.from("recintos").update(fila).eq("id", provisional.id);
+      if (error) throw error;
+      recId = provisional.id;
+      usado = true;
+    } else {
+      const { data, error } = await supabase.from("recintos").insert(fila).select("id").single();
+      if (error) throw error;
+      recId = data.id;
+    }
+    const cul = cultivoDe(r);
+    if (cul) await asignarCultivo({ empresaId, recintoId: recId, cultivoId: cul, superficie: r.superficie, campanasActivas: campanas.filter((c) => c.activa) });
+    n++;
+  }
+  return n;
+}
+
 function ImportarSigpac({ fincas, parcelas, onHecho }) {
   const { empresaId, campanas, cultivos, actualizarGps, notificar, recintos: existentes, gps } = useApp();
   const [modo, setModo] = useState("mapa");
@@ -240,76 +315,8 @@ function ImportarSigpac({ fincas, parcelas, onHecho }) {
     setGuardando(true);
     try {
       const elegidos = res.filter((r) => sel.includes(r.recinto));
-      const yaEstan = elegidos.filter((r) =>
-        existentes.some((e) => e.provincia_sigpac === r.provincia && e.municipio_sigpac === r.municipio && e.poligono_sigpac === r.poligono && e.parcela_sigpac === r.parcela && e.recinto_sigpac === r.recinto)
-      );
-      if (yaEstan.length === elegidos.length) throw new Error("Esos recintos ya están en tus parcelas");
-      let parcelaId = destino || null;
-      if (!parcelaId) {
-        const fid = await obtenerFinca(empresaId, fincaId, nuevaFinca);
-        const c = centro(elegidos.find((r) => r.geometria)?.geometria);
-        const { data, error } = await supabase
-          .from("parcelas")
-          .insert({
-            empresa_id: empresaId,
-            finca_id: fid,
-            nombre: nombre.trim() || "Parcela",
-            superficie_total_ha: elegidos.reduce((s, r) => s + (r.superficie || 0), 0),
-            latitud_centro: c?.lat,
-            longitud_centro: c?.lon,
-          })
-          .select("id")
-          .single();
-        if (error) throw error;
-        parcelaId = data.id;
-      }
-      // Si la parcela tenía un recinto provisional (sin SIGPAC), se completa en lugar de duplicar
-      const provisional = destino ? existentes.find((e) => e.parcela_id === destino && e.fuente === "manual" && e.recinto_sigpac == null) : null;
-      let usado = false;
-      for (const r of elegidos) {
-        if (yaEstan.includes(r)) continue;
-        const b = bbox(r.geometria);
-        const c = centro(r.geometria);
-        const fila = {
-          empresa_id: empresaId,
-          parcela_id: parcelaId,
-          provincia_sigpac: r.provincia,
-          municipio_sigpac: r.municipio,
-          agregado_sigpac: r.agregado,
-          zona_sigpac: r.zona,
-          poligono_sigpac: r.poligono,
-          parcela_sigpac: r.parcela,
-          recinto_sigpac: r.recinto,
-          uso_sigpac: r.uso_sigpac,
-          superficie_sigpac_ha: r.superficie,
-          pendiente_media: r.pendiente_media,
-          coef_regadio: r.coef_regadio,
-          geometria: r.geometria,
-          bbox_min_lon: b?.minLon,
-          bbox_min_lat: b?.minLat,
-          bbox_max_lon: b?.maxLon,
-          bbox_max_lat: b?.maxLat,
-          centro_lat: c?.lat,
-          centro_lon: c?.lon,
-          fuente: "sigpac",
-          fecha_importacion: new Date().toISOString(),
-        };
-        let recId;
-        if (provisional && !usado) {
-          const { error } = await supabase.from("recintos").update(fila).eq("id", provisional.id);
-          if (error) throw error;
-          recId = provisional.id;
-          usado = true;
-        } else {
-          const { data, error } = await supabase.from("recintos").insert(fila).select("id").single();
-          if (error) throw error;
-          recId = data.id;
-        }
-        if (cultivoDe[r.recinto]) {
-          await asignarCultivo({ empresaId, recintoId: recId, cultivoId: cultivoDe[r.recinto], superficie: r.superficie, campanasActivas: campanas.filter((c) => c.activa) });
-        }
-      }
-      onHecho(`${elegidos.length - yaEstan.length} recinto(s) importados de SIGPAC ✓`);
+      const n = await guardarRecintosSigpac({ empresaId, elegidos, nombre, destino, fincaId, nuevaFinca, cultivoDe: (r) => cultivoDe[r.recinto], existentes, campanas });
+      onHecho(`${n} recinto(s) importados de SIGPAC ✓`);
     } catch (e) {
       notificar(e.message, "error");
     } finally {
@@ -319,13 +326,15 @@ function ImportarSigpac({ fincas, parcelas, onHecho }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-1 rounded-2xl bg-stone-200/70 p-1 text-[15px] font-bold">
-        {[["mapa", "🗺️ En el mapa"], ["gps", "📍 Estoy aquí"], ["ref", "🔢 Referencia"]].map(([k, t]) => (
-          <button key={k} type="button" onClick={() => { setModo(k); setRes(null); }} className={`rounded-xl py-3 ${modo === k ? "bg-white text-olivo-800 shadow" : "text-stone-600"}`}>
+      <div className="grid grid-cols-4 gap-1 rounded-2xl bg-stone-200/70 p-1 text-sm font-bold">
+        {[["mapa", "🗺️", "Mapa"], ["pac", "📄", "PAC"], ["gps", "📍", "Aquí"], ["ref", "🔢", "Ref."]].map(([k, i, t]) => (
+          <button key={k} type="button" onClick={() => { setModo(k); setRes(null); }} className={`rounded-xl py-2 leading-tight ${modo === k ? "bg-white text-olivo-800 shadow" : "text-stone-600"}`}>
+            <span className="block text-lg">{i}</span>
             {t}
           </button>
         ))}
       </div>
+      {modo === "pac" && <ImportarPac fincas={fincas} parcelas={parcelas} onHecho={onHecho} />}
       {modo === "mapa" && (
         <div className="space-y-2">
           <div className="flex gap-2">
@@ -381,7 +390,7 @@ function ImportarSigpac({ fincas, parcelas, onHecho }) {
           <p className="col-span-4 text-xs text-stone-500">Los códigos están en tu declaración PAC o en el visor SIGPAC (ej. Jaén = 23). Agregado y zona suelen ser 0.</p>
         </div>
       )}
-      {modo !== "mapa" && (
+      {(modo === "gps" || modo === "ref") && (
         <Boton grande className="w-full" disabled={buscando} onClick={() => buscar()}>
           {buscando ? "Consultando SIGPAC…" : modo === "gps" ? "Buscar recinto aquí" : "Buscar parcela"}
         </Boton>
@@ -425,6 +434,198 @@ function ImportarSigpac({ fincas, parcelas, onHecho }) {
           </Boton>
         </>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Carga rápida desde la declaración de la PAC (PDF o fotos)
+const REGLAS_CULTIVO = [
+  [/OLIV/, "Olivar"],
+  [/PISTAC/, "Pistacho"],
+  [/ALMEND/, "Almendro"],
+  [/VI(Ñ|N)EDO|\bUVA|\bVID\b/, "Viñedo"],
+  [/ESPARRAG/, "Espárrago verde"],
+  [/TRIGO|CEBADA|AVENA|CENTENO|TRITICALE|CEREAL/, "Cereal"],
+];
+const normal = (x) => (x || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+const claveParcela = (r) => [r.provincia, r.municipio, r.agregado ?? 0, r.zona ?? 0, r.poligono, r.parcela].join("-");
+
+function ImportarPac({ fincas, parcelas, onHecho }) {
+  const [destinos, setDestinos] = useState({});
+  const { empresaId, campanas, cultivos, notificar, recintos: existentes } = useApp();
+  const [fase, setFase] = useState("inicio"); // inicio | leyendo | revisar
+  const [filas, setFilas] = useState([]);
+  const [nombres, setNombres] = useState({});
+  const [notas, setNotas] = useState(null);
+  const [fincaId, setFincaId] = useState(null);
+  const [nuevaFinca, setNuevaFinca] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  function cultivoPara(producto, uso) {
+    const p = normal(producto);
+    const porRegla = REGLAS_CULTIVO.find(([re]) => re.test(p))?.[1];
+    const c =
+      cultivos.find((x) => x.nombre === porRegla) ||
+      (p && cultivos.find((x) => p.includes(normal(x.nombre)) || normal(x.nombre).includes(p))) ||
+      cultivos.find((x) => x.nombre === CULTIVO_POR_USO[uso]);
+    return c?.id || "";
+  }
+
+  async function procesar(e) {
+    const archivos = [...(e.target.files || [])];
+    e.target.value = "";
+    if (!archivos.length) return;
+    setFase("leyendo");
+    try {
+      const rutas = [];
+      for (const f of archivos.slice(0, 12)) {
+        const esPdf = f.type === "application/pdf";
+        if (esPdf && f.size > 20 * 1024 * 1024) throw new Error("El PDF pesa más de 20 MB");
+        const { blob, tipo } = esPdf ? { blob: f, tipo: f.type } : await comprimirImagen(f, 2200, 0.85);
+        const ruta = `${empresaId}/pac_tmp/${crypto.randomUUID()}.${esPdf ? "pdf" : "jpg"}`;
+        const up = await supabase.storage.from("documentos").upload(ruta, blob, { contentType: tipo });
+        if (up.error) throw up.error;
+        rutas.push(ruta);
+      }
+      const j = await apiPost("/api/importar-pac", { empresa_id: empresaId, rutas });
+      if (!j.recintos?.length) throw new Error(j.notas || "No he encontrado recintos en el documento. Prueba con el PDF o con fotos más nítidas de la hoja de parcelas.");
+      const f = j.recintos.map((x, i) => {
+        const ya = x.sigpac && existentes.some((e) => mismoRecinto(e, x.sigpac));
+        return { ...x, id: i, ya, sel: !!x.sigpac && !ya, cultivo: cultivoPara(x.declarado.producto, x.sigpac?.uso_sigpac) };
+      });
+      setFilas(f);
+      const n = {};
+      for (const x of f) n[claveParcela(x.declarado)] = n[claveParcela(x.declarado)] || `Pol. ${x.declarado.poligono} Parc. ${x.declarado.parcela}`;
+      setNombres(n);
+      setNotas(j.notas);
+      setFase("revisar");
+    } catch (err) {
+      notificar(err.message, "error");
+      setFase("inicio");
+    }
+  }
+
+  const grupos = useMemo(() => {
+    const g = {};
+    for (const x of filas) (g[claveParcela(x.declarado)] = g[claveParcela(x.declarado)] || []).push(x);
+    return Object.entries(g);
+  }, [filas]);
+  const elegidas = filas.filter((x) => x.sel && x.sigpac);
+  const nParcelas = new Set(elegidas.map((x) => claveParcela(x.declarado))).size;
+  const ha = elegidas.reduce((s, x) => s + (x.sigpac.superficie || 0), 0);
+  const set = (id, k, v) => setFilas((fs) => fs.map((x) => (x.id === id ? { ...x, [k]: v } : x)));
+
+  async function guardarTodo() {
+    setGuardando(true);
+    try {
+      const fid = await obtenerFinca(empresaId, fincaId, nuevaFinca);
+      let total = 0;
+      for (const [k, lista] of grupos) {
+        const sel = lista.filter((x) => x.sel && x.sigpac && !x.ya);
+        if (!sel.length) continue;
+        // un mismo recinto puede venir en varias líneas (varios productos): se guarda una vez
+        const unicos = [...new Map(sel.map((x) => [x.sigpac.recinto, x])).values()];
+        total += await guardarRecintosSigpac({
+          empresaId,
+          elegidos: unicos.map((x) => x.sigpac),
+          nombre: nombres[k],
+          destino: destinos[k] || null,
+          fincaId: fid,
+          nuevaFinca: "",
+          cultivoDe: (r) => unicos.find((x) => x.sigpac.recinto === r.recinto)?.cultivo || null,
+          existentes,
+          campanas,
+        });
+      }
+      onHecho(`${total} recinto(s) en ${nParcelas} parcela(s) cargados desde la PAC ✓`);
+    } catch (e) {
+      notificar(e.message, "error");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  if (fase === "inicio")
+    return (
+      <div className="space-y-3">
+        <p className="text-[15px] text-stone-700">
+          Sube el <b>PDF de tu solicitud única de la PAC</b> o haz fotos a las hojas donde salen tus parcelas. La app lee las referencias, las comprueba en SIGPAC y te las propone todas de golpe.
+        </p>
+        <label className="flex min-h-14 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl bg-olivo-700 px-4 text-lg font-bold text-white">
+          📄 Subir PDF o fotos
+          <input type="file" accept="application/pdf,image/*" multiple className="hidden" onChange={procesar} />
+        </label>
+        <label className="flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-olivo-200 bg-white px-4 font-bold text-olivo-800">
+          📷 Hacer una foto ahora
+          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={procesar} />
+        </label>
+        <p className="text-xs text-stone-500">🔒 Solo se leen las parcelas declaradas. El documento se borra en cuanto se ha leído y no se guardan tu NIF ni tu cuenta bancaria. Mejor el PDF que una foto.</p>
+      </div>
+    );
+
+  if (fase === "leyendo")
+    return (
+      <div className="rounded-2xl bg-olivo-50 p-6 text-center">
+        <p className="text-3xl">📄🔎</p>
+        <p className="mt-2 font-bold text-olivo-900">Leyendo la declaración y comprobando en SIGPAC…</p>
+        <p className="text-sm text-stone-600">Puede tardar hasta un minuto si tienes muchas parcelas.</p>
+      </div>
+    );
+
+  const malas = filas.filter((x) => x.estado === "no_encontrado" || x.estado === "sin_conexion").length;
+  return (
+    <div className="space-y-3">
+      <p className="rounded-2xl bg-olivo-50 p-3 text-[15px] text-olivo-900">
+        He encontrado <b>{filas.length}</b> línea(s) en <b>{grupos.length}</b> parcela(s). Revisa los nombres y los cultivos y desmarca lo que no quieras cargar. Si ya tenías esa parcela creada a mano, elige «Completar» para no duplicarla.
+        {malas > 0 && <span className="mt-1 block font-bold text-red-700">⚠️ {malas} sin comprobar en SIGPAC: revisa la referencia (puede que se haya leído mal).</span>}
+      </p>
+      {notas && <p className="rounded-xl bg-amber-50 p-2 text-sm text-amber-900">📝 {notas}</p>}
+      {grupos.map(([k, lista]) => (
+        <Tarjeta key={k} className="!p-3">
+          <Select
+            className="mb-1 !py-1.5"
+            vacio="➕ Parcela nueva"
+            opciones={parcelas.map((pa) => ({ value: pa.id, label: `Completar «${pa.nombre}»` }))}
+            value={destinos[k] || ""}
+            onChange={(e) => setDestinos({ ...destinos, [k]: e.target.value })}
+          />
+          {!destinos[k] && <Input value={nombres[k] || ""} onChange={(e) => setNombres({ ...nombres, [k]: e.target.value })} aria-label="Nombre de la parcela" className="mb-1 font-bold" />}
+          <p className="mb-2 text-xs text-stone-500">
+            SIGPAC {lista[0].declarado.provincia}-{lista[0].declarado.municipio}-{lista[0].declarado.agregado}-{lista[0].declarado.zona}-{lista[0].declarado.poligono}-{lista[0].declarado.parcela}
+          </p>
+          {lista.map((x) => (
+            <div key={x.id} className={`mb-2 rounded-xl border p-2 ${x.sel ? "border-olivo-400 bg-olivo-50/40" : "border-stone-200"}`}>
+              <label className="flex items-start gap-2">
+                <input type="checkbox" className="mt-1 h-6 w-6 accent-olivo-700" disabled={!x.sigpac || x.ya} checked={x.sel && !x.ya} onChange={(e) => set(x.id, "sel", e.target.checked)} />
+                <span className="flex-1 text-[15px]">
+                  <b>Recinto {x.declarado.recinto}</b>
+                  {x.declarado.producto ? ` · ${x.declarado.producto}` : ""}
+                  <span className="block text-sm text-stone-600">
+                    Declarado {x.declarado.superficie_ha != null ? `${num(x.declarado.superficie_ha)} ha` : "—"}
+                    {x.sigpac ? ` · SIGPAC ${num(x.sigpac.superficie)} ha · ${x.sigpac.uso_sigpac || ""}` : ""}
+                    {x.declarado.regadio ? " · regadío" : ""}
+                  </span>
+                  {x.ya && <Etiqueta color="gris">Ya la tienes</Etiqueta>}
+                  {x.estado === "superficie_distinta" && !x.ya && <Etiqueta color="ambar">Superficie distinta a SIGPAC</Etiqueta>}
+                  {x.estado === "no_encontrado" && <span className="mt-1 block text-sm font-bold text-red-700">No existe en SIGPAC: puede que un número se haya leído mal. Añádela luego desde el mapa.</span>}
+                  {x.estado === "sin_conexion" && <span className="mt-1 block text-sm font-bold text-red-700">SIGPAC no ha respondido para esta parcela. Vuelve a intentarlo luego.</span>}
+                </span>
+              </label>
+              {x.sel && !x.ya && (
+                <Select className="mt-2 !py-1.5" vacio="Cultivo: sin indicar" opciones={cultivos.map((c) => ({ value: c.id, label: c.nombre }))} value={x.cultivo || ""} onChange={(e) => set(x.id, "cultivo", e.target.value)} />
+              )}
+            </div>
+          ))}
+        </Tarjeta>
+      ))}
+      <SelectorFinca fincas={fincas} fincaId={fincaId} setFincaId={setFincaId} nueva={nuevaFinca} setNueva={setNuevaFinca} />
+      <Boton grande className="w-full" disabled={!elegidas.length || guardando} onClick={guardarTodo}>
+        {guardando ? "Guardando…" : `Cargar ${nParcelas} parcela(s) · ${num(ha)} ha`}
+      </Boton>
+      <Boton variante="secundario" className="w-full" onClick={() => setFase("inicio")}>
+        Subir otro documento
+      </Boton>
     </div>
   );
 }
