@@ -25,6 +25,7 @@ const cabecerasSeguridad = [
       `connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.open-meteo.com https://nominatim.openstreetmap.org${supa}`,
       "font-src 'self' data:",
       "worker-src 'self'",
+      `frame-src 'self' https://*.supabase.co${supa}`,
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",

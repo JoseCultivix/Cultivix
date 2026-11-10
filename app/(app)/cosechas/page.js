@@ -1,4 +1,5 @@
 "use client";
+import VerDocumento from "@/components/VerDocumento";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiPost, supabase } from "@/lib/supabase";
@@ -174,6 +175,7 @@ function Cosechas() {
               <p className="text-[15px] text-stone-700">
                 {fechaCorta(e.fecha)} · {e.destinos_cosecha?.nombre || "Sin destino"}
                 {e.numero_ticket ? ` · Ticket ${e.numero_ticket}` : ""}
+                {e.documento_id ? " · 📷" : ""}
               </p>
               <p className="text-sm text-stone-500">
                 {[
@@ -358,9 +360,12 @@ function FormEntrega({ item, destinos, entregas, onHecho }) {
   return (
     <div className="space-y-4">
       <input ref={camara} type="file" accept="image/*" capture="environment" className="hidden" onChange={fotoTicket} />
-      <Boton variante="secundario" className="w-full" disabled={leyendo} onClick={() => camara.current?.click()}>
-        {leyendo ? "Leyendo ticket…" : f.documento_id ? "📷 Ticket guardado · repetir foto" : "📷 Foto del ticket"}
-      </Boton>
+      <div className="flex gap-2">
+        <Boton variante="secundario" className="flex-1" disabled={leyendo} onClick={() => camara.current?.click()}>
+          {leyendo ? "Leyendo ticket…" : f.documento_id ? "📷 Repetir foto" : "📷 Foto del ticket"}
+        </Boton>
+        {f.documento_id && !leyendo && <VerDocumento documentoId={f.documento_id} texto="👁️ Ver ticket" className="flex-1" />}
+      </div>
 
       <div>
         <p className="mb-2 text-sm font-bold text-stone-700">Cultivo</p>

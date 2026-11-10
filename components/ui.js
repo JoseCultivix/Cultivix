@@ -153,6 +153,7 @@ export function Hoja({ abierta, onCerrar, titulo, children }) {
     abrirEntradaHoja();
     let porAtras = false;
     const alVolver = () => {
+      if (window.__cultivixVisor) return; // el atrás es para el visor de documentos que hay encima
       porAtras = true;
       cb.current?.();
     };

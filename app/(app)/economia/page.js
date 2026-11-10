@@ -1,4 +1,5 @@
 "use client";
+import VerDocumento from "@/components/VerDocumento";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
@@ -31,7 +32,7 @@ export default function Economia() {
           .in("partes_trabajo.estado", ["validado", "pendiente"]),
         supabase
           .from("albaranes_compra")
-          .select("id, fecha, numero, total, con_factura, estado, proveedores(nombre)")
+          .select("id, fecha, numero, total, con_factura, estado, documento_id, proveedores(nombre)")
           .eq("empresa_id", empresaId)
           .gte("fecha", desde)
           .lte("fecha", hasta)
@@ -181,7 +182,10 @@ export default function Economia() {
                       {fechaCorta(a.fecha)} · {a.numero || "s/n"} {a.con_factura ? "" : "· sin factura"}
                     </span>
                   </span>
-                  <b>{euros(a.total)}</b>
+                  <span className="flex flex-col items-end gap-1">
+                    <b>{euros(a.total)}</b>
+                    {a.documento_id && <VerDocumento documentoId={a.documento_id} texto="👁️ Ver" className="!min-h-9 !px-3 text-sm" />}
+                  </span>
                 </div>
               ))}
               {!datos.albaranes.length && <p className="text-stone-500">Sin compras en estas fechas.</p>}
