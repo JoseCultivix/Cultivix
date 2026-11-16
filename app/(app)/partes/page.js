@@ -3,7 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import ParteEditor from "@/components/ParteEditor";
-import { Boton, Cargando, Etiqueta, Hoja, Pagina, Vacio } from "@/components/ui";
+import { eliminarRegistro } from "@/lib/eliminar";
+import { Boton, Cargando, Etiqueta, Hoja, Pagina, Vacio, BotonEliminar } from "@/components/ui";
 import { guardarParte } from "@/lib/offline";
 import { euros, fechaLarga, nombreRecinto, num } from "@/lib/formato";
 
@@ -70,14 +71,6 @@ export default function Partes() {
     } finally {
       setGuardando(false);
     }
-  }
-
-  async function descartar(p) {
-    if (!confirm("¿Descartar este parte?")) return;
-    const { error } = await supabase.from("partes_trabajo").update({ estado: "descartado" }).eq("id", p.id);
-    if (error) return notificar(error.message, "error");
-    setEditando(null);
-    cargar();
   }
 
   const grupos = {};
@@ -171,9 +164,18 @@ export default function Partes() {
               onGuardar={guardarEdicion}
             />
             {(esGestor || editando.estado !== "validado") && (
-              <Boton variante="peligro" className="mt-3 w-full" onClick={() => descartar(editando)}>
-                Descartar parte
-              </Boton>
+              <BotonEliminar
+                className="mt-3 w-full"
+                texto="🗑️ Eliminar parte"
+                pregunta="¿Eliminar este parte? Se borran también su tratamiento, abonado o riego, y el stock de productos se recalcula. No se puede deshacer."
+                onEliminar={() => eliminarRegistro("partes_trabajo", editando.id)}
+                textoHecho="Parte eliminado"
+                onHecho={(m) => {
+                  notificar(m);
+                  setEditando(null);
+                  cargar();
+                }}
+              />
             )}
           </>
         )}

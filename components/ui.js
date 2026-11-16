@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { abrirEntradaHoja, cerrarEntradaHoja } from "@/lib/navegacion";
 
@@ -200,5 +200,41 @@ export function Seccion({ titulo, accion, children, className = "" }) {
       </div>
       {children}
     </section>
+  );
+}
+
+/**
+ * Botón «Eliminar» común a toda la app. Pide confirmación; si el registro tiene histórico asociado
+ * (error de clave ajena o «en uso») y se pasa onBaja, ofrece darlo de baja en su lugar.
+ */
+export function BotonEliminar({ texto = "🗑️ Eliminar", pregunta, onEliminar, onBaja, textoHecho = "Eliminado ✓", textoBaja = "Dado de baja ✓", onHecho, className = "w-full" }) {
+  const [ocupado, setOcupado] = useState(false);
+  async function pulsar(e) {
+    e?.stopPropagation?.();
+    if (!window.confirm(pregunta || "¿Eliminar este registro? No se puede deshacer.")) return;
+    setOcupado(true);
+    try {
+      await onEliminar();
+      onHecho?.(textoHecho);
+    } catch (err) {
+      const enUso = err?.enUso || (err?.code === "23503" ? "No se puede eliminar porque tiene trabajos u otros registros asociados en el histórico." : null);
+      if (enUso && onBaja) {
+        if (window.confirm(`${enUso}\n\n¿Prefieres darlo de baja? Dejará de aparecer en las listas, pero se conserva el histórico.`)) {
+          try {
+            await onBaja();
+            onHecho?.(textoBaja);
+          } catch (e2) {
+            window.alert(e2?.message || String(e2));
+          }
+        }
+      } else window.alert(enUso || err?.message || String(err));
+    } finally {
+      setOcupado(false);
+    }
+  }
+  return (
+    <Boton variante="peligro" className={className} disabled={ocupado} onClick={pulsar}>
+      {ocupado ? "Eliminando…" : texto}
+    </Boton>
   );
 }

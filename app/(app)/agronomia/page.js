@@ -271,6 +271,18 @@ function AgronomIA() {
               <button type="button" onClick={() => continuar(h)} className="mt-3 w-full rounded-xl bg-olivo-700 py-2.5 font-bold text-white">
                 Seguir con esta consulta
               </button>
+              <button
+                type="button"
+                className="mt-2 w-full rounded-xl border-2 border-red-200 py-2 font-bold text-red-700"
+                onClick={async () => {
+                  if (!window.confirm("¿Eliminar esta consulta? No se puede deshacer.")) return;
+                  const { data, error } = await supabase.from("consultas_agronomia").delete().eq("id", h.id).select("id");
+                  if (error || !data?.length) return window.alert(error?.message || "Solo puedes eliminar tus propias consultas.");
+                  setHistorial((x) => x.filter((y) => y.id !== h.id));
+                }}
+              >
+                🗑️ Eliminar consulta
+              </button>
             </details>
           ))}
         </div>

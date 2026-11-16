@@ -8,7 +8,7 @@ const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const COLORES = { Olivar: "#6f8c41", Pistacho: "#b5a33a", Almendro: "#c27c3e", "Espárrago verde": "#3f9a6b", Viñedo: "#8e3b5a", Cereal: "#d4b44a" };
 
 /** Mapa con ortofoto PNOA (IGN) y tus recintos coloreados por cultivo. */
-export default function MapaLeaflet({ recintos, gps, fotos = [], onSeleccionar }) {
+export default function MapaLeaflet({ recintos, gps, fotos = [], onSeleccionar, onEliminarFoto }) {
   const caja = useRef(null);
   const mapa = useRef(null);
   const capa = useRef(null);
@@ -60,13 +60,21 @@ export default function MapaLeaflet({ recintos, gps, fotos = [], onSeleccionar }
           const p = document.createElement("p");
           p.textContent = f.descripcion || "";
           div.append(img, p);
+          if (onEliminarFoto) {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.textContent = "🗑️ Eliminar foto";
+            b.style.cssText = "margin-top:6px;width:100%;padding:6px;border:2px solid #fecaca;border-radius:10px;color:#b91c1c;font-weight:700;background:#fff";
+            b.onclick = () => onEliminarFoto(f);
+            div.append(b);
+          }
           return div;
         })
         .addTo(capa.current);
     }
     const b = capa.current.getBounds();
     if (b.isValid()) m.fitBounds(b, { padding: [30, 30], maxZoom: 17 });
-  }, [recintos, fotos, onSeleccionar]);
+  }, [recintos, fotos, onSeleccionar, onEliminarFoto]);
 
   useEffect(() => {
     const m = mapa.current;

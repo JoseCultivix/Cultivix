@@ -30,6 +30,16 @@ export default function Mapa() {
       });
   }, [empresaId]);
 
+  const eliminarFoto = useCallback(
+    async (f) => {
+      if (!window.confirm("¿Eliminar esta foto? No se puede deshacer.")) return;
+      const { data, error } = await supabase.from("fotografias").delete().eq("id", f.id).select("id");
+      if (error || !data?.length) return window.alert(error?.message || "Solo puedes eliminar tus propias fotos.");
+      if (f.archivo_path) await supabase.storage.from("documentos").remove([f.archivo_path]);
+      setFotos((x) => x.filter((y) => y.id !== f.id));
+    },
+    []
+  );
   const seleccionar = useCallback(async (r) => {
     setSel(r);
     const { data } = await supabase
@@ -43,7 +53,7 @@ export default function Mapa() {
 
   return (
     <div className="relative h-[calc(100dvh-4rem)] w-full">
-      <MapaLeaflet recintos={recintos} gps={gps} fotos={fotos} onSeleccionar={seleccionar} />
+      <MapaLeaflet recintos={recintos} gps={gps} fotos={fotos} onSeleccionar={seleccionar} onEliminarFoto={eliminarFoto} />
       <button type="button" onClick={actualizarGps} className="absolute top-3 left-3 z-[400] rounded-full bg-white px-4 py-2.5 text-sm font-bold shadow-lg">
         📍 Dónde estoy
       </button>

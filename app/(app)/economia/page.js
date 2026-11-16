@@ -4,12 +4,15 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import SelectorCampana, { campanasSeleccionadas } from "@/components/SelectorCampana";
-import { Boton, Cargando, Pagina, Seccion, Tarjeta } from "@/components/ui";
+import { Boton, BotonEliminar, Campo, Cargando, Hoja, Input, Pagina, Seccion, Select, Tarjeta } from "@/components/ui";
+import { eliminarRegistro } from "@/lib/eliminar";
 import { euros, fechaCorta, num } from "@/lib/formato";
 
 export default function Economia() {
-  const { empresaId, campanas, recintos, labores, esGestor } = useApp();
+  const { empresaId, campanas, recintos, labores, esGestor, productos, notificar, recargar } = useApp();
   const [sel, setSel] = useState("activas");
+  const [albaran, setAlbaran] = useState(null);
+  const [recarga, setRecarga] = useState(0);
   const [datos, setDatos] = useState(null);
   const elegidas = useMemo(() => campanasSeleccionadas(campanas, sel), [campanas, sel]);
   const ids = elegidas.map((c) => c.id);
@@ -32,7 +35,7 @@ export default function Economia() {
           .in("partes_trabajo.estado", ["validado", "pendiente"]),
         supabase
           .from("albaranes_compra")
-          .select("id, fecha, numero, total, con_factura, estado, documento_id, proveedores(nombre)")
+          .select("id, empresa_id, fecha, numero, total, con_factura, estado, documento_id, proveedor_id, proveedores(nombre)")
           .eq("empresa_id", empresaId)
           .gte("fecha", desde)
           .lte("fecha", hasta)
@@ -59,7 +62,7 @@ export default function Economia() {
       }
       setDatos({ lineas: l.data || [], albaranes: a.data || [], costes, supTotal, entregas: e.data || [], reparto: rep.data || [] });
     })();
-  }, [empresaId, ids.join(",")]); // eslint-disable-line
+  }, [empresaId, ids.join(","), recarga]); // eslint-disable-line
 
   const r = useMemo(() => {
     if (!datos) return null;
@@ -176,12 +179,13 @@ export default function Economia() {
             <div className="space-y-2">
               {datos.albaranes.slice(0, 15).map((a) => (
                 <div key={a.id} className="flex justify-between rounded-2xl bg-white px-4 py-3 shadow-sm">
-                  <span>
+                  <button type="button" className="flex-1 text-left" onClick={() => setAlbaran(a)}>
                     <b>{a.proveedores?.nombre || "Proveedor"}</b>
                     <span className="block text-sm text-stone-500">
                       {fechaCorta(a.fecha)} · {a.numero || "s/n"} {a.con_factura ? "" : "· sin factura"}
                     </span>
-                  </span>
+                    <span className="text-sm font-bold text-olivo-700">✏️ Ver y corregir</span>
+                  </button>
                   <span className="flex flex-col items-end gap-1">
                     <b>{euros(a.total)}</b>
                     {a.documento_id && <VerDocumento documentoId={a.documento_id} texto="👁️ Ver" className="!min-h-9 !px-3 text-sm" />}
@@ -191,6 +195,21 @@ export default function Economia() {
               {!datos.albaranes.length && <p className="text-stone-500">Sin compras en estas fechas.</p>}
             </div>
           </Seccion>
+
+          <Hoja abierta={!!albaran} onCerrar={() => setAlbaran(null)} titulo="Albarán de compra">
+            {albaran && (
+              <FormAlbaran
+                a={albaran}
+                productos={productos}
+                onHecho={(m) => {
+                  setAlbaran(null);
+                  setRecarga((x) => x + 1);
+                  recargar?.();
+                  notificar(m);
+                }}
+              />
+            )}
+          </Hoja>
 
           <p className="mt-6 rounded-2xl bg-olivo-50 p-4 text-sm text-olivo-900">
             <b>Próximo paso:</b> añadir las ayudas PAC repartidas por recinto para completar la rentabilidad real.
@@ -222,6 +241,127 @@ function Barra({ etiqueta, valor, total, color }) {
       <div className="mt-1 h-2.5 rounded-full bg-stone-100">
         <div className={`h-2.5 rounded-full ${color}`} style={{ width: `${pct}%` }} />
       </div>
+    </div>
+  );
+}
+
+// Corregir o eliminar un albarán de compra (cabecera y líneas). El stock se recalcula solo a partir de las líneas.
+function FormAlbaran({ a, productos, onHecho }) {
+  const [f, setF] = useState({ fecha: a.fecha, numero: a.numero || "", total: a.total ?? "", con_factura: !!a.con_factura, proveedor_id: a.proveedor_id || "" });
+  const [lineas, setLineas] = useState(null);
+  const [borradas, setBorradas] = useState([]);
+  const [proveedores, setProveedores] = useState([]);
+  const [guardando, setGuardando] = useState(false);
+  const n = (x) => (x === "" || x == null ? null : Number(String(x).replace(",", ".")));
+
+  useEffect(() => {
+    supabase.from("albaranes_compra_lineas").select("*").eq("albaran_id", a.id).then(({ data }) => setLineas(data || []));
+    supabase.from("proveedores").select("id, nombre").eq("empresa_id", a.empresa_id ?? undefined).order("nombre").then(({ data }) => setProveedores(data || []));
+  }, [a.id]); // eslint-disable-line
+
+  const setL = (id, k, v) =>
+    setLineas((ls) =>
+      ls.map((l) => {
+        if (l.id !== id) return l;
+        const x = { ...l, [k]: v, _cambio: true };
+        // Al cambiar cantidad o precio, el importe se recalcula
+        if ((k === "cantidad" || k === "precio_unitario") && n(x.cantidad) != null && n(x.precio_unitario) != null) x.importe = String(Math.round(n(x.cantidad) * n(x.precio_unitario) * 100) / 100);
+        return x;
+      })
+    );
+
+  async function guardar() {
+    setGuardando(true);
+    try {
+      const { error } = await supabase
+        .from("albaranes_compra")
+        .update({ fecha: f.fecha, numero: f.numero || null, total: n(f.total), con_factura: f.con_factura, proveedor_id: f.proveedor_id || null })
+        .eq("id", a.id);
+      if (error) throw error;
+      for (const id of borradas) {
+        const r = await supabase.from("albaranes_compra_lineas").delete().eq("id", id);
+        if (r.error) throw r.error;
+      }
+      for (const l of (lineas || []).filter((x) => x._cambio)) {
+        const cantidad = n(l.cantidad);
+        const precio = n(l.precio_unitario);
+        const r = await supabase
+          .from("albaranes_compra_lineas")
+          .update({ producto_id: l.producto_id || null, descripcion: l.descripcion, cantidad, precio_unitario: precio, importe: n(l.importe) ?? (cantidad != null && precio != null ? Math.round(cantidad * precio * 100) / 100 : null) })
+          .eq("id", l.id);
+        if (r.error) throw r.error;
+      }
+      onHecho("Albarán corregido ✓");
+    } catch (e) {
+      window.alert(e.message);
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      {a.documento_id && <VerDocumento documentoId={a.documento_id} texto="👁️ Ver foto del albarán" className="w-full" />}
+      <div className="grid grid-cols-2 gap-2">
+        <Campo etiqueta="Fecha">
+          <Input type="date" value={f.fecha} onChange={(e) => setF({ ...f, fecha: e.target.value })} />
+        </Campo>
+        <Campo etiqueta="Nº albarán">
+          <Input value={f.numero} onChange={(e) => setF({ ...f, numero: e.target.value })} />
+        </Campo>
+        <Campo etiqueta="Proveedor" className="col-span-2">
+          <Select vacio="Sin proveedor" opciones={proveedores.map((p) => ({ value: p.id, label: p.nombre }))} value={f.proveedor_id} onChange={(e) => setF({ ...f, proveedor_id: e.target.value })} />
+        </Campo>
+        <Campo etiqueta="Total (€)">
+          <Input inputMode="decimal" value={f.total} onChange={(e) => setF({ ...f, total: e.target.value })} />
+        </Campo>
+        <label className="mt-6 flex items-center gap-2 text-[15px] font-semibold">
+          <input type="checkbox" className="h-5 w-5 accent-olivo-700" checked={f.con_factura} onChange={(e) => setF({ ...f, con_factura: e.target.checked })} />
+          Con factura
+        </label>
+      </div>
+      <p className="text-sm font-bold text-stone-700">Líneas</p>
+      {lineas === null ? (
+        <Cargando />
+      ) : (
+        lineas.map((l) => (
+          <Tarjeta key={l.id} className="!p-3">
+            <Input value={l.descripcion || ""} onChange={(e) => setL(l.id, "descripcion", e.target.value)} className="mb-2 font-semibold" />
+            <Select className="mb-2 !py-1.5" vacio="Sin producto del almacén" opciones={productos.map((p) => ({ value: p.id, label: p.nombre }))} value={l.producto_id || ""} onChange={(e) => setL(l.id, "producto_id", e.target.value)} />
+            <div className="grid grid-cols-3 gap-2">
+              <Campo etiqueta={`Cantidad${l.unidad ? ` (${l.unidad})` : ""}`}>
+                <Input inputMode="decimal" value={l.cantidad ?? ""} onChange={(e) => setL(l.id, "cantidad", e.target.value)} />
+              </Campo>
+              <Campo etiqueta="Precio/ud">
+                <Input inputMode="decimal" value={l.precio_unitario ?? ""} onChange={(e) => setL(l.id, "precio_unitario", e.target.value)} />
+              </Campo>
+              <Campo etiqueta="Importe €">
+                <Input inputMode="decimal" value={l.importe ?? ""} onChange={(e) => setL(l.id, "importe", e.target.value)} />
+              </Campo>
+            </div>
+            <button
+              type="button"
+              className="mt-2 text-sm font-bold text-red-700"
+              onClick={() => {
+                setBorradas((b) => [...b, l.id]);
+                setLineas((ls) => ls.filter((x) => x.id !== l.id));
+              }}
+            >
+              🗑️ Quitar esta línea
+            </button>
+          </Tarjeta>
+        ))
+      )}
+      <Boton grande className="w-full" disabled={guardando || !f.fecha} onClick={guardar}>
+        {guardando ? "Guardando…" : "Guardar cambios"}
+      </Boton>
+      <BotonEliminar
+        texto="🗑️ Eliminar albarán"
+        pregunta="¿Eliminar este albarán y todas sus líneas? El stock de sus productos se recalcula. No se puede deshacer."
+        onEliminar={() => eliminarRegistro("albaranes_compra", a.id)}
+        textoHecho="Albarán eliminado"
+        onHecho={onHecho}
+      />
     </div>
   );
 }

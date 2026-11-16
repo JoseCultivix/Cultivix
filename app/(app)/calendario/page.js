@@ -3,7 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import ParteEditor from "@/components/ParteEditor";
-import { Boton, Cargando, Etiqueta, Hoja, Pagina, Vacio } from "@/components/ui";
+import { eliminarRegistro } from "@/lib/eliminar";
+import { Boton, Cargando, Etiqueta, Hoja, Pagina, Vacio, BotonEliminar } from "@/components/ui";
 import { guardarParte } from "@/lib/offline";
 import { euros, fechaLarga, hora, hoyISO, nombreRecinto, num } from "@/lib/formato";
 
@@ -289,13 +290,14 @@ export default function Calendario() {
     }
   }
   async function cancelarTarea(t) {
-    if (!confirm("¿Quitar esta tarea del calendario?")) return;
-    let q = supabase.from("tareas_planificadas").update({ estado: "cancelada" });
-    if (t.grupo_id && confirm("Esta tarea se repite. ¿Quitar también las siguientes repeticiones?")) q = q.eq("grupo_id", t.grupo_id).eq("estado", "pendiente").gte("fecha", t.fecha);
+    if (!confirm("¿Eliminar esta tarea del calendario? No se puede deshacer.")) return;
+    let q = supabase.from("tareas_planificadas").delete();
+    if (t.grupo_id && confirm("Esta tarea se repite. ¿Eliminar también las siguientes repeticiones pendientes?")) q = q.eq("grupo_id", t.grupo_id).eq("estado", "pendiente").gte("fecha", t.fecha);
     else q = q.eq("id", t.id);
-    const { error } = await q;
+    const { data, error } = await q.select("id");
     if (error) return notificar(error.message, "error");
-    notificar("Tarea quitada");
+    if (!data?.length) return notificar("No tienes permiso para eliminar esta tarea", "error");
+    notificar(data.length > 1 ? `${data.length} tareas eliminadas` : "Tarea eliminada");
     setHojaTarea(null);
     cargar();
   }
@@ -535,9 +537,22 @@ export default function Calendario() {
         {detalle && !editando && (
           <Detalle p={detalle} {...{ nomLabor, nomTrab, recintos, maquinaria, aperos, productos }}>
             {detalle.estado !== "en_curso" && (esGestor || detalle.estado !== "validado") && (
-              <Boton variante="secundario" className="mt-4 w-full" onClick={() => setEditando(true)}>
-                ✏️ Editar este parte
-              </Boton>
+              <div className="mt-4 flex flex-col gap-2">
+                <Boton variante="secundario" className="w-full" onClick={() => setEditando(true)}>
+                  ✏️ Editar este parte
+                </Boton>
+                <BotonEliminar
+                  texto="🗑️ Eliminar parte"
+                  pregunta="¿Eliminar este parte? Se borran también su tratamiento, abonado o riego, y el stock de productos se recalcula. No se puede deshacer."
+                  onEliminar={() => eliminarRegistro("partes_trabajo", detalle.id)}
+                  textoHecho="Parte eliminado"
+                  onHecho={(m) => {
+                    notificar(m);
+                    setDetalle(null);
+                    cargar();
+                  }}
+                />
+              </div>
             )}
           </Detalle>
         )}
@@ -618,7 +633,7 @@ export default function Calendario() {
               )}
               {puedePlanificar && (
                 <Boton variante="peligro" onClick={() => cancelarTarea(hojaTarea.tarea)}>
-                  Quitar tarea
+                  🗑️ Eliminar tarea
                 </Boton>
               )}
             </div>

@@ -1,8 +1,9 @@
 "use client";
+import { comprobarSinUso, eliminarRegistro } from "@/lib/eliminar";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
-import { Boton, Campo, Etiqueta, Hoja, Input, Pagina, Select, Vacio } from "@/components/ui";
+import { Boton, Campo, Etiqueta, Hoja, Input, Pagina, Select, Vacio, BotonEliminar } from "@/components/ui";
 import { euros, fechaCorta, num } from "@/lib/formato";
 import { fichaRegistro, usosRegistro } from "@/lib/fitos";
 
@@ -248,6 +249,20 @@ function FormProducto({ p, empresaId, onHecho }) {
       </Boton>
       {f.tipo === "fitosanitario" && !f.numero_registro && <Etiqueta color="ambar">El nº de registro es necesario para el cuaderno de campo</Etiqueta>}
       {f.tipo === "fertilizante" && n(f.riqueza_n) == null && n(f.riqueza_p2o5) == null && n(f.riqueza_k2o) == null && <Etiqueta color="ambar">Indica la riqueza para el control de fertilización</Etiqueta>}
+      {p.id && (
+        <BotonEliminar
+          texto="🗑️ Eliminar producto"
+          pregunta="¿Eliminar este producto? Se borran también sus ajustes de stock. Las líneas de albaranes de compra se conservan sin producto. No se puede deshacer."
+          onEliminar={async () => {
+            await comprobarSinUso([["aplicaciones_productos", "producto_id", p.id]], "Este producto se ha usado en tratamientos o abonados del cuaderno de campo.");
+            await eliminarRegistro("productos", p.id);
+          }}
+          onBaja={() => supabase.from("productos").update({ activo: false }).eq("id", p.id)}
+          textoHecho="Producto eliminado"
+          textoBaja="Producto dado de baja (se conserva en el cuaderno)"
+          onHecho={onHecho}
+        />
+      )}
     </div>
   );
 }

@@ -1,8 +1,9 @@
 "use client";
+import { comprobarSinUso, eliminarRegistro } from "@/lib/eliminar";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
-import { Boton, Campo, Etiqueta, Fichas, Hoja, Input, Pagina, Select, Seccion, Tarjeta } from "@/components/ui";
+import { Boton, Campo, Etiqueta, Fichas, Hoja, Input, Pagina, Select, Seccion, Tarjeta, BotonEliminar } from "@/components/ui";
 import { euros, fechaCorta } from "@/lib/formato";
 import TusDatos from "@/components/TusDatos";
 import { CCAA, CARNES } from "@/lib/ccaa";
@@ -294,6 +295,24 @@ function FormCampana({ empresaId, item, cultivos, campanas, onHecho }) {
       <Boton grande className="w-full" disabled={!f.nombre || !f.fecha_inicio || !f.fecha_fin || guardando} onClick={guardar}>
         Guardar
       </Boton>
+      {item && (
+        <BotonEliminar
+          texto="🗑️ Eliminar campaña"
+          pregunta="¿Eliminar esta campaña? Se quitarán también los cultivos asignados a las parcelas y el plan de abonado de esta campaña. No se puede deshacer."
+          onEliminar={async () => {
+            await comprobarSinUso(
+              [
+                ["partes_trabajo", "campana_id", item.id],
+                ["entregas_cosecha", "campana_id", item.id],
+              ],
+              "Esta campaña tiene trabajos o entregas de cosecha registrados, así que no se puede eliminar. Puedes cambiarle las fechas o desmarcarla como campaña en curso."
+            );
+            await eliminarRegistro("campanas", item.id);
+          }}
+          textoHecho="Campaña eliminada"
+          onHecho={onHecho}
+        />
+      )}
     </div>
   );
 }
@@ -380,17 +399,27 @@ function FormTrabajador({ empresaId, item, onHecho }) {
         Guardar
       </Boton>
       {item && !item.usuario_id && (
-        <Boton
-          variante="peligro"
-          className="w-full"
-          onClick={async () => {
-            await supabase.from("trabajadores").update({ activo: false, fecha_baja: new Date().toISOString().slice(0, 10) }).eq("id", item.id);
-            onHecho("Trabajador dado de baja");
-          }}
-        >
-          Dar de baja
-        </Boton>
+        <>
+          <Boton
+            variante="secundario"
+            className="w-full"
+            onClick={async () => {
+              await supabase.from("trabajadores").update({ activo: false, fecha_baja: new Date().toISOString().slice(0, 10) }).eq("id", item.id);
+              onHecho("Trabajador dado de baja");
+            }}
+          >
+            Dar de baja (conserva su histórico)
+          </Boton>
+          <BotonEliminar
+            texto="🗑️ Eliminar trabajador"
+            onEliminar={() => eliminarRegistro("trabajadores", item.id)}
+            onBaja={() => supabase.from("trabajadores").update({ activo: false, fecha_baja: new Date().toISOString().slice(0, 10) }).eq("id", item.id)}
+            textoHecho="Trabajador eliminado"
+            onHecho={onHecho}
+          />
+        </>
       )}
+      {item?.usuario_id && <p className="text-sm text-stone-500">Este trabajador tiene cuenta en la app. Para quitarlo, retira primero su acceso en «Equipo y accesos».</p>}
     </div>
   );
 }
@@ -436,6 +465,19 @@ function FormLabor({ empresaId, item, maquinaria, aperos, onHecho }) {
       <Boton grande className="w-full" disabled={!f.nombre} onClick={guardar}>
         Guardar
       </Boton>
+      {item && (
+        <BotonEliminar
+          texto="🗑️ Eliminar labor"
+          onEliminar={async () => {
+            await comprobarSinUso([["partes_trabajo", "labor_id", item.id]], "Hay partes de trabajo con esta labor.");
+            await eliminarRegistro("labores", item.id);
+          }}
+          onBaja={() => supabase.from("labores").update({ activa: false }).eq("id", item.id)}
+          textoHecho="Labor eliminada"
+          textoBaja="Labor dada de baja (los partes la conservan)"
+          onHecho={onHecho}
+        />
+      )}
     </div>
   );
 }
@@ -484,16 +526,23 @@ function FormAsesor({ empresaId, item, onHecho }) {
         Guardar
       </Boton>
       {item && (
-        <Boton
-          variante="peligro"
-          className="w-full"
-          onClick={async () => {
-            await supabase.from("asesores").update({ activo: false }).eq("id", item.id);
-            onHecho("Asesor quitado");
+        <BotonEliminar
+          texto="🗑️ Eliminar asesor"
+          onEliminar={async () => {
+            await comprobarSinUso(
+              [
+                ["aplicaciones", "asesor_id", item.id],
+                ["planes_abonado", "asesor_id", item.id],
+              ],
+              "Este asesor figura en tratamientos o planes de abonado del cuaderno de campo."
+            );
+            await eliminarRegistro("asesores", item.id);
           }}
-        >
-          Quitar asesor
-        </Boton>
+          onBaja={() => supabase.from("asesores").update({ activo: false }).eq("id", item.id)}
+          textoHecho="Asesor eliminado"
+          textoBaja="Asesor quitado (se conserva en el cuaderno)"
+          onHecho={onHecho}
+        />
       )}
     </div>
   );

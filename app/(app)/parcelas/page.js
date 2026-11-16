@@ -1,10 +1,11 @@
 "use client";
+import { eliminarRegistro } from "@/lib/eliminar";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiGet, apiPost, supabase } from "@/lib/supabase";
 import { comprimirImagen } from "@/lib/imagen";
 import { useApp } from "@/components/AppProvider";
-import { Boton, Campo, Etiqueta, Fichas, Hoja, Input, Pagina, Select, Tarjeta, Vacio } from "@/components/ui";
+import { Boton, Campo, Etiqueta, Fichas, Hoja, Input, Pagina, Select, Tarjeta, Vacio, BotonEliminar } from "@/components/ui";
 import { bbox, centro } from "@/lib/geo";
 import { asignarCultivo } from "@/lib/campanas";
 import { CULTIVO_POR_USO, USOS_SIGPAC, num } from "@/lib/formato";
@@ -734,14 +735,38 @@ function EditarParcela({ parcela, fincas, onHecho }) {
             <input type="checkbox" className="h-5 w-5 accent-olivo-700" checked={!!vulnerable[r.id]} onChange={(e) => setVulnerable({ ...vulnerable, [r.id]: e.target.checked })} />
             En zona vulnerable a nitratos
           </label>
+          {mios.length > 1 && (
+            <BotonEliminar
+              className="mt-2 !min-h-9 w-full text-sm"
+              texto="🗑️ Quitar este recinto"
+              pregunta="¿Quitar este recinto de la parcela? No se puede deshacer."
+              onEliminar={() => eliminarRegistro("recintos", r.id)}
+              onBaja={() => supabase.from("recintos").update({ activo: false }).eq("id", r.id)}
+              textoHecho="Recinto quitado"
+              textoBaja="Recinto dado de baja (se conserva su histórico)"
+              onHecho={onHecho}
+            />
+          )}
         </Tarjeta>
       ))}
       <Boton grande className="w-full" onClick={guardar}>
         Guardar
       </Boton>
-      <Boton variante="peligro" className="w-full" onClick={baja}>
-        Dar de baja
+      <Boton variante="secundario" className="w-full" onClick={baja}>
+        Dar de baja (conserva su histórico)
       </Boton>
+      <BotonEliminar
+        texto="🗑️ Eliminar parcela"
+        pregunta="¿Eliminar esta parcela y todos sus recintos? No se puede deshacer."
+        onEliminar={() => eliminarRegistro("parcelas", parcela.id)}
+        onBaja={async () => {
+          await supabase.from("parcelas").update({ activa: false }).eq("id", parcela.id);
+          await supabase.from("recintos").update({ activo: false }).eq("parcela_id", parcela.id);
+        }}
+        textoHecho="Parcela eliminada"
+        textoBaja="Parcela dada de baja (se conserva su histórico)"
+        onHecho={onHecho}
+      />
     </div>
   );
 }

@@ -1,8 +1,9 @@
 "use client";
+import { eliminarRegistro } from "@/lib/eliminar";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
-import { Boton, Campo, Cargando, Etiqueta, Hoja, Input, Pagina, Select, Tarjeta, Vacio } from "@/components/ui";
+import { Boton, Campo, Cargando, Etiqueta, Hoja, Input, Pagina, Select, Tarjeta, Vacio, BotonEliminar } from "@/components/ui";
 import SelectorCampana, { campanasSeleccionadas } from "@/components/SelectorCampana";
 import { fechaCorta, num } from "@/lib/formato";
 
@@ -277,6 +278,15 @@ function FormPlan({ hoja, empresaId, asesores, onHecho }) {
         >
           Usar el máximo general
         </Boton>
+      )}
+      {p.id && !hoja.recinto && (
+        <BotonEliminar
+          texto="🗑️ Eliminar plan de abonado"
+          pregunta="¿Eliminar el plan de abonado de esta campaña? No se puede deshacer."
+          onEliminar={() => eliminarRegistro("planes_abonado", p.id)}
+          textoHecho="Plan de abonado eliminado"
+          onHecho={onHecho}
+        />
       )}
     </div>
   );

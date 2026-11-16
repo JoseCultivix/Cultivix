@@ -1,11 +1,12 @@
 "use client";
 import VerDocumento from "@/components/VerDocumento";
+import { eliminarRegistro } from "@/lib/eliminar";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiPost, supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import SelectorCampana, { campanasSeleccionadas } from "@/components/SelectorCampana";
-import { Boton, Campo, Cargando, Etiqueta, Fichas, Hoja, Input, Pagina, Seccion, Select, Tarjeta, Vacio } from "@/components/ui";
+import { Boton, Campo, Cargando, Etiqueta, Fichas, Hoja, Input, Pagina, Seccion, Select, Tarjeta, Vacio, BotonEliminar } from "@/components/ui";
 import { blobABase64, comprimirImagen } from "@/lib/imagen";
 import { euros, fechaCorta, hoyISO, nombreRecinto, num } from "@/lib/formato";
 
@@ -198,7 +199,7 @@ function Cosechas() {
           </Boton>
           {!entregas.some((e) => !e.liquidacion_id) && <p className="text-center text-sm text-stone-500">Todas las entregas de esta campaña tienen precio.</p>}
           {liqs.map((l) => (
-            <Tarjeta key={l.id} className="!p-3">
+            <Tarjeta key={l.id} className="!p-3" onClick={() => setHoja({ tipo: "verLiq", item: l })}>
               <div className="flex justify-between">
                 <b>{l.destinos_cosecha?.nombre || "Destino"}</b>
                 <b>{euros(l.importe_neto ?? l.importe_bruto)}</b>
@@ -211,7 +212,31 @@ function Cosechas() {
         </div>
       )}
 
-      <Hoja abierta={!!hoja} onCerrar={() => setHoja(null)} titulo={hoja?.tipo === "liquidar" ? "Liquidación" : hoja?.item ? "Editar entrega" : "Entrega de cosecha"}>
+      <Hoja abierta={!!hoja} onCerrar={() => setHoja(null)} titulo={hoja?.tipo === "liquidar" || hoja?.tipo === "verLiq" ? "Liquidación" : hoja?.item ? "Editar entrega" : "Entrega de cosecha"}>
+        {hoja?.tipo === "verLiq" && (
+          <div className="space-y-3">
+            <p className="text-lg font-extrabold text-olivo-900">
+              {hoja.item.destinos_cosecha?.nombre || "Destino"} · {euros(hoja.item.importe_neto ?? hoja.item.importe_bruto)}
+            </p>
+            <p className="text-[15px] text-stone-700">
+              {fechaCorta(hoja.item.fecha)} · nº {hoja.item.numero || "s/n"} · {hoja.item.tipo} · {hoja.item.cultivos?.nombre || ""}
+            </p>
+            <p className="text-sm text-stone-600">{(entregas || []).filter((e) => e.liquidacion_id === hoja.item.id).length} entrega(s) liquidadas con ella.</p>
+            {hoja.item.documento_id && <VerDocumento documentoId={hoja.item.documento_id} texto="👁️ Ver documento" className="w-full" />}
+            <p className="rounded-xl bg-amber-50 p-2 text-sm text-amber-900">Para corregir precios, elimínala y vuelve a registrarla: sus entregas volverán a quedar «sin precio».</p>
+            <BotonEliminar
+              texto="🗑️ Eliminar liquidación"
+              pregunta="¿Eliminar esta liquidación? Sus entregas volverán a quedar sin precio y los ingresos se recalcularán. No se puede deshacer."
+              onEliminar={async () => {
+                const { error } = await supabase.from("entregas_cosecha").update({ precio: null, liquidacion_id: null }).eq("liquidacion_id", hoja.item.id);
+                if (error) throw error;
+                await eliminarRegistro("liquidaciones_cosecha", hoja.item.id);
+              }}
+              textoHecho="Liquidación eliminada"
+              onHecho={hecho}
+            />
+          </div>
+        )}
         {hoja?.tipo === "entrega" && <FormEntrega item={hoja.item} destinos={destinos} entregas={entregas || []} onHecho={hecho} />}
         {hoja?.tipo === "liquidar" && <FormLiquidacion destinos={destinos} entregas={(entregas || []).filter((e) => !e.liquidacion_id)} onHecho={hecho} />}
       </Hoja>
@@ -349,13 +374,6 @@ function FormEntrega({ item, destinos, entregas, onHecho }) {
     }
   }
 
-  async function borrar() {
-    if (!confirm("¿Borrar esta entrega?")) return;
-    const { error } = await supabase.from("entregas_cosecha").delete().eq("id", item.id);
-    if (error) return notificar(error.message, "error");
-    onHecho("Entrega borrada");
-  }
-
   const kg = n(f.kilos_netos);
   return (
     <div className="space-y-4">
@@ -462,9 +480,13 @@ function FormEntrega({ item, destinos, entregas, onHecho }) {
         {guardando ? "Guardando…" : "Guardar entrega"}
       </Boton>
       {item && (
-        <Boton variante="peligro" className="w-full" onClick={borrar}>
-          Borrar entrega
-        </Boton>
+        <BotonEliminar
+          texto="🗑️ Eliminar entrega"
+          pregunta={item.liquidacion_id ? "Esta entrega ya está en una liquidación. ¿Eliminarla de todas formas? No se puede deshacer." : "¿Eliminar esta entrega? No se puede deshacer."}
+          onEliminar={() => eliminarRegistro("entregas_cosecha", item.id)}
+          textoHecho="Entrega eliminada"
+          onHecho={onHecho}
+        />
       )}
     </div>
   );
