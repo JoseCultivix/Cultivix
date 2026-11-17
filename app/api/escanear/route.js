@@ -26,7 +26,12 @@ const HERRAMIENTA = {
             descripcion: { type: "string", description: "Texto de la línea tal cual" },
             producto_id: { type: "string", description: "ID de un producto existente del catálogo si es el mismo producto; si no, vacío" },
             producto_nombre: { type: "string", description: "Nombre comercial limpio del producto (sin formato de envase)" },
-            tipo: { type: "string", enum: ["fitosanitario", "fertilizante", "herbicida", "bioestimulante", "semilla", "gasoil", "otro"] },
+            tipo: {
+              type: "string",
+              enum: ["fitosanitario", "herbicida", "fertilizante", "bioestimulante", "semilla", "gasoil", "repuesto", "reparacion", "material", "servicio", "energia", "seguro", "otro"],
+              description: "Tipo de gasto: repuesto = piezas, filtros, aceites y lubricantes; reparacion = mano de obra de taller; material = riego, postes, mallas, herramientas; servicio = trabajos de terceros, análisis, asesoría; energia = luz o agua",
+            },
+            lote: { type: "string", description: "Número de lote del producto, si aparece" },
             cantidad: { type: "number", description: "Cantidad TOTAL en la unidad indicada (ej. 2 sacos de 25 kg = 50 kg)" },
             unidad: { type: "string", enum: ["kg", "l", "ud", "t", "g", "ml"] },
             precio_unitario: { type: "number", description: "Precio por unidad (kg, l…) sin IVA" },

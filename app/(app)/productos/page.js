@@ -1,5 +1,6 @@
 "use client";
 import { comprobarSinUso, eliminarRegistro } from "@/lib/eliminar";
+import { categoria } from "@/lib/compras";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
@@ -7,7 +8,8 @@ import { Boton, Campo, Etiqueta, Hoja, Input, Pagina, Select, Vacio, BotonElimin
 import { euros, fechaCorta, num } from "@/lib/formato";
 import { fichaRegistro, usosRegistro } from "@/lib/fitos";
 
-const TIPOS = ["fitosanitario", "fertilizante", "herbicida", "bioestimulante", "semilla", "gasoil", "otro"];
+const TIPOS = ["fitosanitario", "herbicida", "fertilizante", "bioestimulante", "semilla", "gasoil", "repuesto", "material", "otro"];
+const nombreTipo = (t) => (t ? `${categoria(t).icono} ${categoria(t).t}` : "Todos");
 
 export default function Productos() {
   const { empresaId, productos, esGestor, recargar, notificar } = useApp();
@@ -145,26 +147,32 @@ function FichaRegistro({ registro }) {
 }
 
 function FormProducto({ p, empresaId, onHecho }) {
-  const [f, setF] = useState({ nombre: "", tipo: "fitosanitario", unidad: "kg", materia_activa: "", numero_registro: "", dosis_habitual_ha: "", plazo_seguridad_dias: "", riqueza_n: "", riqueza_p2o5: "", riqueza_k2o: "", densidad_kg_l: "", n_organico: false, ...p });
+  const [f, setF] = useState({ nombre: "", tipo: "fitosanitario", unidad: "kg", materia_activa: "", numero_registro: "", dosis_habitual_ha: "", plazo_seguridad_dias: "", riqueza_n: "", riqueza_p2o5: "", riqueza_k2o: "", densidad_kg_l: "", n_organico: false, variedad: "", pasaporte_fitosanitario: false, ...p });
   const [ajuste, setAjuste] = useState("");
   const c = (k) => ({ value: f[k] ?? "", onChange: (e) => setF({ ...f, [k]: e.target.value }) });
   const n = (x) => (x === "" || x == null ? null : Number(String(x).replace(",", ".")));
 
   async function guardar() {
+    // Solo se guardan los datos que tienen sentido para el tipo de producto
+    const fito = f.tipo === "fitosanitario" || f.tipo === "herbicida";
+    const abono = f.tipo === "fertilizante" || f.tipo === "bioestimulante";
+    const aplicable = fito || abono || f.tipo === "semilla";
     const datos = {
       empresa_id: empresaId,
       nombre: f.nombre.trim(),
       tipo: f.tipo,
       unidad: f.unidad,
-      materia_activa: f.materia_activa || null,
-      numero_registro: f.numero_registro || null,
-      dosis_habitual_ha: n(f.dosis_habitual_ha),
-      plazo_seguridad_dias: n(f.plazo_seguridad_dias),
-      riqueza_n: n(f.riqueza_n),
-      riqueza_p2o5: n(f.riqueza_p2o5),
-      riqueza_k2o: n(f.riqueza_k2o),
-      densidad_kg_l: n(f.densidad_kg_l),
-      n_organico: !!f.n_organico,
+      materia_activa: fito || f.tipo === "bioestimulante" ? f.materia_activa || null : null,
+      numero_registro: fito ? f.numero_registro || null : null,
+      dosis_habitual_ha: aplicable ? n(f.dosis_habitual_ha) : null,
+      plazo_seguridad_dias: fito ? n(f.plazo_seguridad_dias) : null,
+      riqueza_n: abono ? n(f.riqueza_n) : null,
+      riqueza_p2o5: abono ? n(f.riqueza_p2o5) : null,
+      riqueza_k2o: abono ? n(f.riqueza_k2o) : null,
+      densidad_kg_l: abono ? n(f.densidad_kg_l) : null,
+      n_organico: abono ? !!f.n_organico : false,
+      variedad: f.tipo === "semilla" ? f.variedad || null : null,
+      pasaporte_fitosanitario: f.tipo === "semilla" ? !!f.pasaporte_fitosanitario : null,
     };
     const { error } = p.id ? await supabase.from("productos").update(datos).eq("id", p.id) : await supabase.from("productos").insert(datos);
     if (error) return alert(error.message);
@@ -195,25 +203,56 @@ function FormProducto({ p, empresaId, onHecho }) {
       </Campo>
       <div className="grid grid-cols-2 gap-2">
         <Campo etiqueta="Tipo">
-          <Select vacio={null} opciones={TIPOS.map((t) => ({ value: t, label: t }))} {...c("tipo")} />
+          <Select vacio={null} opciones={TIPOS.map((t) => ({ value: t, label: nombreTipo(t) }))} {...c("tipo")} />
         </Campo>
         <Campo etiqueta="Unidad">
           <Select vacio={null} opciones={["kg", "l", "ud", "t"].map((t) => ({ value: t, label: t }))} {...c("unidad")} />
         </Campo>
-        <Campo etiqueta="Materia activa">
-          <Input {...c("materia_activa")} />
-        </Campo>
-        <Campo etiqueta="Nº registro MAPA">
-          <Input {...c("numero_registro")} />
-        </Campo>
-        <Campo etiqueta={`Dosis habitual (${f.unidad}/ha)`}>
-          <Input inputMode="decimal" {...c("dosis_habitual_ha")} />
-        </Campo>
-        <Campo etiqueta="Plazo seguridad (días)">
-          <Input inputMode="numeric" {...c("plazo_seguridad_dias")} />
-        </Campo>
+        {esFito && (
+          <>
+            <Campo etiqueta="Materia activa">
+              <Input {...c("materia_activa")} />
+            </Campo>
+            <Campo etiqueta="Nº registro MAPA">
+              <Input {...c("numero_registro")} />
+            </Campo>
+            <Campo etiqueta={`Dosis habitual (${f.unidad}/ha)`}>
+              <Input inputMode="decimal" {...c("dosis_habitual_ha")} />
+            </Campo>
+            <Campo etiqueta="Plazo seguridad (días)">
+              <Input inputMode="numeric" {...c("plazo_seguridad_dias")} />
+            </Campo>
+          </>
+        )}
+        {f.tipo === "bioestimulante" && (
+          <Campo etiqueta="Composición" className="col-span-2">
+            <Input {...c("materia_activa")} placeholder="Aminoácidos, algas, Zn + Mn…" />
+          </Campo>
+        )}
+        {(f.tipo === "fertilizante" || f.tipo === "bioestimulante") && (
+          <Campo etiqueta={`Dosis habitual (${f.unidad}/ha)`} className="col-span-2">
+            <Input inputMode="decimal" {...c("dosis_habitual_ha")} />
+          </Campo>
+        )}
+        {f.tipo === "semilla" && (
+          <>
+            <Campo etiqueta="Variedad">
+              <Input {...c("variedad")} />
+            </Campo>
+            <Campo etiqueta={`Dosis de siembra (${f.unidad}/ha)`}>
+              <Input inputMode="decimal" {...c("dosis_habitual_ha")} />
+            </Campo>
+            <label className="col-span-2 flex items-center gap-2 text-sm font-semibold">
+              <input type="checkbox" className="h-5 w-5 accent-olivo-700" checked={!!f.pasaporte_fitosanitario} onChange={(e) => setF({ ...f, pasaporte_fitosanitario: e.target.checked })} />
+              Lleva pasaporte fitosanitario (plantones, material de vivero)
+            </label>
+          </>
+        )}
       </div>
-      {(["fertilizante", "bioestimulante", "otro"].includes(f.tipo) || n(f.riqueza_n) != null) && (
+      {["gasoil", "repuesto", "material", "otro"].includes(f.tipo) && (
+        <p className="rounded-xl bg-stone-100 p-2 text-sm text-stone-600">Para este tipo solo hace falta el nombre y la unidad. Su coste se imputa al registrar la compra (a máquinas, parcelas o gasto general).</p>
+      )}
+      {["fertilizante", "bioestimulante"].includes(f.tipo) && (
         <div className="rounded-2xl bg-olivo-50 p-3">
           <p className="text-sm font-bold text-olivo-800">Riqueza del abono (% en peso)</p>
           <p className="mb-2 text-xs text-stone-600">Viene en el saco o la etiqueta (ej. 15-15-15). Sirve para calcular los kg de N, P y K por hectárea.</p>
