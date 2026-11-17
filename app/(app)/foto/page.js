@@ -5,6 +5,7 @@ import { useNavegar } from "@/lib/navegacion";
 import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import { comprimirImagen } from "@/lib/imagen";
+import { agregarABandeja, esFalloDeRed } from "@/lib/bandeja";
 import { detectarRecinto } from "@/lib/geo";
 import { nombreRecinto } from "@/lib/formato";
 import { Boton, Fichas, Input, Pagina } from "@/components/ui";
@@ -41,8 +42,16 @@ export default function Foto() {
 
   async function guardar() {
     setGuardando(true);
+    let blob = null;
+    const observacion = tipo !== "Seguimiento" || nota ? { tipo: tipo.split(" ")[0].toLowerCase(), descripcion: nota || tipo } : null;
+    const sinCobertura = async () => {
+      await agregarABandeja({ tipo: "foto", empresa_id: empresaId, blob, lat: pos?.lat ?? null, lon: pos?.lon ?? null, recinto_id: recintoId, descripcion: nota || tipo, observacion });
+      notificar("📥 Sin cobertura: foto guardada en el móvil. Se subirá sola al volver la señal.");
+      setTimeout(() => navegar("/"), 2500);
+    };
     try {
-      const { blob } = await comprimirImagen(foto);
+      blob = (await comprimirImagen(foto)).blob;
+      if (!navigator.onLine) return await sinCobertura();
       const ruta = `${empresaId}/fotos/${new Date().toISOString().slice(0, 10)}/${crypto.randomUUID()}.jpg`;
       const up = await supabase.storage.from("documentos").upload(ruta, blob, { contentType: "image/jpeg" });
       if (up.error) throw up.error;
@@ -52,18 +61,13 @@ export default function Foto() {
         .select("id")
         .single();
       if (error) throw error;
-      if (tipo !== "Seguimiento" || nota) {
-        await supabase.from("observaciones_agronomicas").insert({
-          empresa_id: empresaId,
-          recinto_id: recintoId,
-          tipo: tipo.split(" ")[0].toLowerCase(),
-          descripcion: nota || tipo,
-          fotografia_id: ft.id,
-        });
+      if (observacion) {
+        await supabase.from("observaciones_agronomicas").insert({ ...observacion, empresa_id: empresaId, recinto_id: recintoId, fotografia_id: ft.id });
       }
       notificar("Foto guardada ✓");
       navegar("/");
     } catch (e) {
+      if (blob && esFalloDeRed(e)) return await sinCobertura();
       notificar("No se pudo subir la foto: " + e.message, "error");
     } finally {
       setGuardando(false);

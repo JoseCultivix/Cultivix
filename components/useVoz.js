@@ -2,13 +2,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Dictado por voz con el reconocimiento del propio móvil (Chrome/Android, Safari iOS). */
-export function useVoz({ onFinal } = {}) {
+export function useVoz({ onFinal, onError } = {}) {
   const [escuchando, setEscuchando] = useState(false);
   const [parcial, setParcial] = useState("");
   const [disponible, setDisponible] = useState(false);
   const rec = useRef(null);
   const cb = useRef(onFinal);
   cb.current = onFinal;
+  const cbErr = useRef(onError);
+  cbErr.current = onError;
 
   useEffect(() => {
     const SR = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -32,7 +34,10 @@ export function useVoz({ onFinal } = {}) {
       }
     };
     r.onend = () => setEscuchando(false);
-    r.onerror = () => setEscuchando(false);
+    r.onerror = (e) => {
+      setEscuchando(false);
+      cbErr.current?.(e?.error || "error");
+    };
     rec.current = r;
     return () => r.abort();
   }, []);

@@ -46,8 +46,8 @@ export default function AppLayout({ children }) {
   return (
     <>
       {(!online || pendientes > 0) && (
-        <div className="no-print sticky top-0 z-40 bg-amber-500 px-4 py-1.5 text-center text-sm font-bold text-white">
-          {!online ? "Sin cobertura · lo que registres se guardará en el móvil" : `Enviando ${pendientes} registro(s) pendiente(s)…`}
+        <div className="no-print sticky top-0 z-40 bg-amber-500 h-8 truncate px-4 py-1.5 text-center text-sm font-bold leading-5 text-white">
+          {!online ? "📵 Sin cobertura · se guarda en el móvil" : `Enviando ${pendientes} registro(s) pendiente(s)…`}
         </div>
       )}
       <NavegacionMovil />

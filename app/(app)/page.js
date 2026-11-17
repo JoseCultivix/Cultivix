@@ -5,12 +5,20 @@ import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import { Etiqueta, Seccion, Tarjeta } from "@/components/ui";
 import { leerTrabajoEnCurso } from "@/lib/offline";
+import { ETIQUETA, enlaceDe, listarBandeja } from "@/lib/bandeja";
 import { duracion, fechaLarga, nombreRecinto, num, saludo } from "@/lib/formato";
 
 const TIEMPO = { 0: "☀️", 1: "🌤️", 2: "⛅", 3: "☁️", 45: "🌫️", 48: "🌫️", 51: "🌦️", 53: "🌦️", 55: "🌧️", 61: "🌧️", 63: "🌧️", 65: "🌧️", 80: "🌦️", 81: "🌧️", 82: "⛈️", 95: "⛈️" };
 
 export default function Inicio() {
-  const { perfil, empresa, empresaId, esGestor, deteccion, gps, recintos, labores, productos, trabajadores, actualizarGps } = useApp();
+  const { perfil, empresa, empresaId, esGestor, deteccion, gps, recintos, labores, productos, trabajadores, actualizarGps, online, pendientes } = useApp();
+  const [bandeja, setBandeja] = useState([]);
+  useEffect(() => {
+    const f = () => listarBandeja(empresaId).then(setBandeja);
+    f();
+    window.addEventListener("cultivix-bandeja", f);
+    return () => window.removeEventListener("cultivix-bandeja", f);
+  }, [empresaId]);
   const [tareasHoy, setTareasHoy] = useState([]);
   const [alertas, setAlertas] = useState([]);
   const [tiempo, setTiempo] = useState(null);
@@ -168,6 +176,41 @@ export default function Inicio() {
         <Accion href="/foto" icono="📷" texto="Hacer foto" />
         {esGestor ? <Accion href="/escanear" icono="📄" texto="Escanear documento" /> : <Accion href="/partes" icono="📋" texto="Mis partes" />}
       </div>
+      {(bandeja.length > 0 || pendientes > 0) && (
+        <div className="mt-3 rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="font-extrabold text-amber-900">📥 Guardado sin cobertura</p>
+          {!online && <p className="text-sm text-amber-800">Se enviará y podrás revisarlo cuando vuelva la señal.</p>}
+          {pendientes > 0 && <p className="mt-1 text-[15px] text-stone-700">🚜 {pendientes} trabajo(s) esperando a enviarse</p>}
+          {bandeja.map((it) => {
+            const e = ETIQUETA[it.tipo] || { icono: "•", texto: it.tipo };
+            const cuando = new Date(it.creado).toLocaleString("es-ES", { weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+            const enlace = enlaceDe(it);
+            const cuerpo = (
+              <>
+                <span className="text-xl">{e.icono}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[15px] font-bold text-stone-800">{it.tipo === "nota" ? `«${it.texto.length > 70 ? it.texto.slice(0, 70) + "…" : it.texto}»` : e.texto}</span>
+                  <span className="block text-xs text-stone-500">
+                    {cuando}
+                    {it.tipo === "foto" ? " · se sube sola" : online ? " · toca para revisarlo" : ""}
+                    {it.error ? ` · ⚠️ ${it.error}` : ""}
+                  </span>
+                </span>
+                {enlace && online && <span className="text-stone-400">›</span>}
+              </>
+            );
+            return enlace && online ? (
+              <Link key={it.id} href={enlace} className="mt-2 flex items-center gap-3 rounded-xl bg-white p-2 shadow-sm">
+                {cuerpo}
+              </Link>
+            ) : (
+              <div key={it.id} className="mt-2 flex items-center gap-3 rounded-xl bg-white/60 p-2">
+                {cuerpo}
+              </div>
+            );
+          })}
+        </div>
+      )}
       <Link href="/cosechas?nueva=1" className="mt-3 flex items-center gap-3 rounded-2xl border-2 border-tierra-100 bg-tierra-50 px-4 py-3 font-extrabold text-tierra-700">
         <span className="text-2xl">🧺</span> Apuntar entrega de cosecha
       </Link>

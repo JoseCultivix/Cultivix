@@ -9,6 +9,7 @@ import SelectorCampana, { campanasSeleccionadas } from "@/components/SelectorCam
 import { Boton, Campo, Cargando, Etiqueta, Fichas, Hoja, Input, Pagina, Seccion, Select, Tarjeta, Vacio, BotonEliminar } from "@/components/ui";
 import { blobABase64, comprimirImagen } from "@/lib/imagen";
 import { euros, fechaCorta, hoyISO, nombreRecinto, num } from "@/lib/formato";
+import { actualizarBandeja, agregarABandeja, esFalloDeRed, leerDeBandeja, quitarDeBandeja, subirDocumento } from "@/lib/bandeja";
 
 const CALIDADES = {
   olivar: ["Vuelo", "Suelo", "Árbol", "Mesa"],
@@ -36,7 +37,16 @@ function Cosechas() {
   const [destinos, setDestinos] = useState([]);
   const [liqs, setLiqs] = useState([]);
   const q = useSearchParams();
-  const [hoja, setHoja] = useState(q.get("nueva") === "1" ? { tipo: "entrega" } : null); // {tipo:'entrega'|'liquidar', item?}
+  const [hoja, setHoja] = useState(q.get("nueva") === "1" ? { tipo: "entrega" } : null); // {tipo:'entrega'|'liquidar', item?, bandeja?}
+  // Ticket fotografiado sin cobertura → se abre la entrega y se lee ahora
+  useEffect(() => {
+    const id = q.get("bandeja");
+    if (!id) return;
+    leerDeBandeja(id).then((it) => {
+      if (it?.tipo === "cosecha") setHoja({ tipo: "entrega", bandeja: it });
+      else notificar("Ese ticket ya estaba apuntado");
+    });
+  }, []); // eslint-disable-line
   const elegidas = useMemo(() => campanasSeleccionadas(campanas, sel), [campanas, sel]);
   const ids = elegidas.map((c) => c.id).join(",");
 
@@ -237,7 +247,7 @@ function Cosechas() {
             />
           </div>
         )}
-        {hoja?.tipo === "entrega" && <FormEntrega item={hoja.item} destinos={destinos} entregas={entregas || []} onHecho={hecho} />}
+        {hoja?.tipo === "entrega" && <FormEntrega item={hoja.item} bandeja={hoja.bandeja} destinos={destinos} entregas={entregas || []} onHecho={hecho} />}
         {hoja?.tipo === "liquidar" && <FormLiquidacion destinos={destinos} entregas={(entregas || []).filter((e) => !e.liquidacion_id)} onHecho={hecho} />}
       </Hoja>
     </Pagina>
@@ -255,12 +265,14 @@ function Dato({ t, v, p, alerta }) {
 }
 
 // ---------------------------------------------------------------------
-function FormEntrega({ item, destinos, entregas, onHecho }) {
-  const { empresaId, cultivos, recintos, deteccion, esGestor, notificar } = useApp();
+function FormEntrega({ item, bandeja, destinos, entregas, onHecho }) {
+  const { empresaId, cultivos, recintos, deteccion: detAhora, esGestor, notificar } = useApp();
+  // Si viene de la bandeja, la parcela es la de cuando se hizo la foto
+  const deteccion = bandeja ? (bandeja.recinto_id ? { recinto: recintos.find((r) => r.id === bandeja.recinto_id) } : null) : detAhora;
   const cultivosUsados = cultivos.filter((c) => recintos.some((r) => r.cultivo_id === c.id));
   const inicialCultivo = item?.cultivo_id || deteccion?.recinto?.cultivo_id || cultivosUsados[0]?.id || null;
   const [f, setF] = useState(() => ({
-    fecha: item?.fecha || hoyISO(),
+    fecha: item?.fecha || (bandeja ? bandeja.creado.slice(0, 10) : hoyISO()),
     cultivo_id: inicialCultivo,
     destino_id: item?.destino_id || entregas[0]?.destino_id || null,
     destino_nombre: "",
@@ -307,17 +319,30 @@ function FormEntrega({ item, destinos, entregas, onHecho }) {
   // Foto del ticket: se archiva y, si la IA está activa, rellena los datos
   async function fotoTicket(ev) {
     const file = ev.target.files?.[0];
+    ev.target.value = "";
     if (!file) return;
+    const { blob, tipo } = await comprimirImagen(file, 2000, 0.85);
+    if (!navigator.onLine) return guardarSinCobertura(blob, tipo, file.name);
+    leerTicket(blob, tipo, file.name, null);
+  }
+
+  async function guardarSinCobertura(blob, tipo, nombre) {
+    await agregarABandeja({ tipo: "cosecha", empresa_id: empresaId, blob, mime: tipo, nombre, recinto_id: detAhora?.recinto?.id || null });
+    onHecho("📥 Sin cobertura: la foto del ticket queda guardada en el móvil. Cuando vuelva la señal te aviso en Inicio para leerla y apuntar la entrega.");
+  }
+
+  async function leerTicket(blob, tipo, nombre, it) {
     setLeyendo(true);
+    let docId = it?.documento_id || null;
     try {
-      const { blob, tipo } = await comprimirImagen(file, 2000, 0.85);
-      const ruta = `${empresaId}/cosechas/${new Date().toISOString().slice(0, 7)}/${crypto.randomUUID()}.jpg`;
-      const up = await supabase.storage.from("documentos").upload(ruta, blob, { contentType: tipo });
-      if (up.error) throw up.error;
-      const { data: d } = await supabase.from("documentos").insert({ empresa_id: empresaId, tipo: "ticket", nombre: file.name, archivo_path: ruta, mime_type: tipo }).select("id").single();
-      set("documento_id", d?.id || null);
+      if (!docId) {
+        docId = (await subirDocumento(empresaId, "cosechas", blob, tipo, nombre, "ticket")).documento_id;
+        if (it) await actualizarBandeja(it.id, { documento_id: docId });
+      }
+      set("documento_id", docId);
       try {
-        const r = await apiPost("/api/escanear", { empresa_id: empresaId, base64: await blobABase64(blob), media_type: tipo, tipo: "cosecha" });
+        const r = it?.resultado || (await apiPost("/api/escanear", { empresa_id: empresaId, base64: await blobABase64(blob), media_type: tipo, tipo: "cosecha" }));
+        if (it && !it.resultado) await actualizarBandeja(it.id, { resultado: r });
         setF((x) => ({
           ...x,
           fecha: r.fecha || x.fecha,
@@ -337,14 +362,23 @@ function FormEntrega({ item, destinos, entregas, onHecho }) {
         }
         notificar("Ticket leído. Revisa los datos ✓");
       } catch (e) {
-        notificar("Foto guardada. " + (e.message.includes("ANTHROPIC") || e.message.includes("IA") ? "La lectura automática estará disponible al activar la IA." : e.message));
+        notificar("Foto guardada. " + (esFalloDeRed(e) ? "Se ha cortado la conexión: rellena los datos a mano." : e.message.includes("ANTHROPIC") || e.message.includes("IA") ? "La lectura automática estará disponible al activar la IA." : e.message));
       }
     } catch (e) {
+      if (!it && !docId && esFalloDeRed(e)) return guardarSinCobertura(blob, tipo, nombre);
       notificar(e.message, "error");
     } finally {
       setLeyendo(false);
     }
   }
+
+  const leida = useRef(false);
+  useEffect(() => {
+    if (!bandeja || leida.current) return;
+    leida.current = true;
+    if (!navigator.onLine) return notificar("Sigues sin cobertura: el ticket se leerá cuando vuelva la señal.", "error");
+    leerTicket(bandeja.blob, bandeja.mime, bandeja.nombre, bandeja);
+  }, []); // eslint-disable-line
 
   async function guardar() {
     setGuardando(true);
@@ -366,6 +400,7 @@ function FormEntrega({ item, destinos, entregas, onHecho }) {
       };
       const { error } = await supabase.rpc("guardar_entrega", { payload });
       if (error) throw error;
+      if (bandeja) await quitarDeBandeja(bandeja.id);
       onHecho(item ? "Entrega actualizada ✓" : "Entrega apuntada ✓");
     } catch (e) {
       notificar(e.message, "error");
@@ -384,6 +419,21 @@ function FormEntrega({ item, destinos, entregas, onHecho }) {
         </Boton>
         {f.documento_id && !leyendo && <VerDocumento documentoId={f.documento_id} texto="👁️ Ver ticket" className="flex-1" />}
       </div>
+      {bandeja && (
+        <p className="rounded-xl bg-amber-50 p-2 text-sm text-amber-900">
+          📥 Ticket fotografiado sin cobertura el {new Date(bandeja.creado).toLocaleString("es-ES", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}.{" "}
+          <button
+            type="button"
+            className="font-bold underline"
+            onClick={async () => {
+              await quitarDeBandeja(bandeja.id);
+              onHecho("Foto descartada");
+            }}
+          >
+            Descartarla
+          </button>
+        </p>
+      )}
 
       <div>
         <p className="mb-2 text-sm font-bold text-stone-700">Cultivo</p>

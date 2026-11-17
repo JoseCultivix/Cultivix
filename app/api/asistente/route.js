@@ -82,7 +82,7 @@ const lista = (arr, f) => arr.map(f).join("\n") || "(ninguno)";
 export async function POST(req) {
   try {
     const { supabase, user } = await clienteDelUsuario(req);
-    const { empresa_id, mensaje, historial = [], recinto_actual_id, canal = "texto" } = await req.json();
+    const { empresa_id, mensaje, historial = [], recinto_actual_id, canal = "texto", fecha_referencia } = await req.json();
     if (!mensaje?.trim()) return Response.json({ error: "Mensaje vacío" }, { status: 400 });
     const rol = await rolEnEmpresa(supabase, user.id, empresa_id);
     await comprobarLimiteIA(supabase);
@@ -124,7 +124,7 @@ export async function POST(req) {
     const nomPro = Object.fromEntries((pro.data || []).map((p) => [p.id, p.nombre]));
     const st = Object.fromEntries((stock.data || []).map((s) => [s.producto_id, s]));
     const yo = (tra.data || []).find((t) => t.usuario_id === user.id);
-    const ahora = ahoraEspana();
+    const ahora = ahoraEspana(fecha_referencia);
 
     const sistema = `Eres el Asistente Cultivix, ayudante de un agricultor español. Hablas claro, breve y cercano, como un buen encargado de campo.
 Tu trabajo es convertir lo que dice el agricultor en una PROPUESTA para que él la confirme con un toque. Nunca digas que has guardado algo: di "revisa y confirma".
@@ -135,7 +135,7 @@ Reglas:
 - Si no menciona parcela y hay "parcela donde está ahora", usa esa.
 - Propón la maquinaria y apero habituales de la labor si no dice otros.
 - Si no menciona trabajadores, déjalo vacío (se asigna quien registra).
-- Fechas relativas respecto a hoy: ${ahora.texto} (hoy = ${ahora.iso}). "Esta mañana" → hoy, hora_inicio 08:00 si no dice otra.
+- Fechas relativas respecto a hoy: ${ahora.texto} (hoy = ${ahora.iso}).${fecha_referencia ? " (Mensaje dictado en el campo sin cobertura y enviado más tarde: \"hoy\" es el día en que lo dijo, el indicado aquí. No uses iniciar_trabajo: si dijo que iba a empezar algo, propón registrar_trabajo de ese día con las horas que diga o sin horas.)" : ""} "Esta mañana" → hoy, hora_inicio 08:00 si no dice otra.
 - Riegos: elige la labor de categoría riego y rellena "riego" con el agua (m³/ha, mm o m³ totales) y el sistema si lo dice.
 - Tratamientos/abonados: elige la labor de categoría tratamiento/fertilizacion/herbicida que mejor encaje y rellena "aplicacion". Si dice la dosis, úsala; si no, la habitual del producto o deja vacío y anótalo en dudas. Comprar un producto NO es aplicarlo.
 - Consultas: responde con datos concretos (horas, costes, fechas, cantidades) calculados de los datos de abajo. Si no hay datos suficientes, dilo. No des recomendaciones de dosis de fitosanitarios más allá de lo registrado: la decisión técnica es del agricultor y su asesor.

@@ -8,6 +8,7 @@ import ParteEditor from "@/components/ParteEditor";
 import { hablar, useVoz } from "@/components/useVoz";
 import { Boton, Hoja } from "@/components/ui";
 import { guardarParte, guardarTrabajoEnCurso, nuevoIdLocal } from "@/lib/offline";
+import { agregarABandeja, esFalloDeRed, leerDeBandeja, quitarDeBandeja } from "@/lib/bandeja";
 import { fechaCorta, nombreRecinto, num } from "@/lib/formato";
 
 const EJEMPLOS = ["Voy a pasar el cultivador en La Mesa", "Esta mañana he estado 3 horas desbrozando", "Ayer traté el pistacho con cobre a 3 kilos", "¿Cuántas horas llevo de tractor esta campaña?", "He visto prays en el olivar de la Cequia"];
@@ -22,7 +23,7 @@ export default function PaginaAsistente() {
 
 function Asistente() {
   const app = useApp();
-  const { empresaId, deteccion, labores, recintos, maquinaria, aperos, productos, esGestor, gps, notificar, recargar, online } = app;
+  const { empresaId, deteccion, labores, recintos, maquinaria, aperos, productos, esGestor, gps, notificar, recargar, online, pendientes } = app;
   const q = useSearchParams();
   const router = useRouter();
   const navegar = useNavegar();
@@ -33,45 +34,88 @@ function Asistente() {
   const [guardando, setGuardando] = useState(false);
   const fin = useRef(null);
   const porVoz = useRef(false);
+  const caja = useRef(null);
+  const [pista, setPista] = useState("");
 
   const voz = useVoz({
     onFinal: (t) => {
       porVoz.current = true;
       enviar(t);
     },
+    onError: (err) => {
+      if (err === "network" || !navigator.onLine) {
+        setPista("Sin cobertura el dictado de la app no funciona. Pulsa el micrófono del teclado para dictar, o escríbelo: lo guardo y lo preparo cuando vuelva la señal.");
+        caja.current?.focus();
+      }
+    },
   });
 
+  function pulsarMicro() {
+    if (voz.escuchando) return voz.parar();
+    if (!online) {
+      setPista("Sin cobertura: dicta con el micrófono del teclado o escríbelo. Lo preparo cuando vuelva la señal.");
+      caja.current?.focus();
+      return;
+    }
+    voz.empezar();
+  }
+
   useEffect(() => {
-    if (q.get("voz") === "1" && voz.disponible) setTimeout(voz.empezar, 300);
+    if (q.get("voz") === "1" && voz.disponible && online) setTimeout(voz.empezar, 300);
   }, [voz.disponible]); // eslint-disable-line
+
+  // Nota guardada sin cobertura: se prepara ahora con la fecha y la parcela de cuando se dijo
+  const deBandeja = useRef(null);
+  useEffect(() => {
+    const id = q.get("bandeja");
+    if (!id || !online || deBandeja.current) return;
+    deBandeja.current = id;
+    leerDeBandeja(id).then((it) => {
+      if (it?.tipo === "nota") enviar(it.texto, { bandeja: it });
+      else if (!it) notificar("Esa nota ya estaba revisada");
+    });
+  }, [online]); // eslint-disable-line
+
+  async function guardarSinCobertura(m) {
+    await agregarABandeja({ tipo: "nota", empresa_id: empresaId, texto: m, recinto_id: deteccion?.recinto?.id || null });
+    setMsgs((x) => [...x, { rol: "asistente", texto: "📥 Sin cobertura. Lo he guardado en el móvil. Cuando vuelva la señal te aviso en Inicio para prepararlo y que lo confirmes." }]);
+  }
 
   useEffect(() => {
     fin.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, pensando]);
 
-  async function enviar(t) {
+  async function enviar(t, { bandeja } = {}) {
     const m = (t ?? texto).trim();
     if (!m || pensando) return;
     setTexto("");
-    if (!online) {
-      setMsgs((x) => [...x, { rol: "usuario", texto: m }, { rol: "asistente", texto: "Ahora no tengo cobertura para pensar 🙂. Usa «Registrar trabajo», que funciona sin conexión." }]);
+    setPista("");
+    if (!online && !bandeja) {
+      setMsgs((x) => [...x, { rol: "usuario", texto: m }]);
+      await guardarSinCobertura(m);
       return;
     }
-    const historial = msgs.map((x) => ({ rol: x.rol, texto: x.texto }));
-    setMsgs((x) => [...x, { rol: "usuario", texto: m }]);
+    const historial = bandeja ? [] : msgs.map((x) => ({ rol: x.rol, texto: x.texto }));
+    const cuando = bandeja ? new Date(bandeja.creado).toLocaleString("es-ES", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : null;
+    setMsgs((x) => [...x, { rol: "usuario", texto: m, nota: cuando ? `Dicho sin cobertura · ${cuando}` : null }]);
     setPensando(true);
     try {
       const r = await apiPost("/api/asistente", {
         empresa_id: empresaId,
         mensaje: m,
         historial,
-        recinto_actual_id: deteccion?.recinto?.id || null,
+        recinto_actual_id: bandeja ? bandeja.recinto_id : deteccion?.recinto?.id || null,
+        fecha_referencia: bandeja?.creado,
         canal: porVoz.current ? "voz" : "texto",
       });
-      setMsgs((x) => [...x, { rol: "asistente", texto: r.mensaje, propuesta: r.tipo !== "consulta" && r.tipo !== "no_entendido" ? r : null, estado: "pendiente" }]);
+      const conPropuesta = r.tipo !== "consulta" && r.tipo !== "no_entendido";
+      setMsgs((x) => [...x, { rol: "asistente", texto: r.mensaje, propuesta: conPropuesta ? r : null, estado: "pendiente", bandejaId: bandeja && conPropuesta ? bandeja.id : null }]);
+      if (bandeja && !conPropuesta) quitarDeBandeja(bandeja.id);
       if (porVoz.current) hablar(r.mensaje);
     } catch (e) {
-      setMsgs((x) => [...x, { rol: "asistente", texto: "⚠️ " + e.message }]);
+      if (!bandeja && esFalloDeRed(e)) {
+        await guardarSinCobertura(m);
+      } else setMsgs((x) => [...x, { rol: "asistente", texto: "⚠️ " + e.message }]);
     } finally {
       setPensando(false);
       porVoz.current = false;
@@ -80,6 +124,8 @@ function Asistente() {
 
   function marcar(i, estado) {
     setMsgs((x) => x.map((m, j) => (j === i ? { ...m, estado } : m)));
+    const bid = msgs[i]?.bandejaId;
+    if (bid && (estado === "guardado" || estado === "descartado")) quitarDeBandeja(bid);
   }
 
   async function cerrarAccion(p, estado, registro) {
@@ -162,7 +208,7 @@ function Asistente() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100dvh-4rem)] max-w-2xl flex-col">
+    <div className={`mx-auto flex max-w-2xl flex-col ${!online || pendientes > 0 ? "h-[calc(100dvh-6rem)]" : "h-[calc(100dvh-4rem)]"}`}>
       <div className="flex-1 overflow-y-auto px-4 pt-5 pb-4">
         {msgs.length === 0 && (
           <div className="pt-4 text-center">
@@ -183,6 +229,7 @@ function Asistente() {
           {msgs.map((m, i) =>
             m.rol === "usuario" ? (
               <div key={i} className="ml-10 rounded-2xl rounded-br-md bg-olivo-700 px-4 py-3 text-[17px] text-white">
+                {m.nota && <p className="mb-1 text-xs font-semibold text-olivo-100">📥 {m.nota}</p>}
                 {m.texto}
               </div>
             ) : (
@@ -213,6 +260,11 @@ function Asistente() {
 
       <div className="border-t border-stone-200 bg-arena px-3 pt-3 pb-3">
         {voz.escuchando && <p className="mb-2 text-center text-[15px] font-semibold text-olivo-800">{voz.parcial || "Te escucho…"}</p>}
+        {!voz.escuchando && (pista || !online) && (
+          <p className="mb-2 rounded-xl bg-amber-50 px-3 py-2 text-center text-sm font-semibold text-amber-900">
+            {pista || "Escribe o dicta con el micrófono del teclado. Lo preparo cuando vuelva la señal."}
+          </p>
+        )}
         <form
           className="flex items-center gap-2"
           onSubmit={(e) => {
@@ -223,14 +275,14 @@ function Asistente() {
           {voz.disponible && (
             <button
               type="button"
-              onClick={voz.escuchando ? voz.parar : voz.empezar}
+              onClick={pulsarMicro}
               className={`h-14 w-14 shrink-0 rounded-full text-2xl shadow ${voz.escuchando ? "animate-pulse bg-red-600 text-white" : "bg-olivo-700 text-white"}`}
               aria-label="Hablar"
             >
               🎤
             </button>
           )}
-          <input value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Escribe o pulsa el micro…" className="h-14 min-w-0 flex-1 rounded-full border-2 border-stone-200 bg-white px-5 text-[17px] outline-none focus:border-olivo-500" />
+          <input ref={caja} value={texto} onChange={(e) => setTexto(e.target.value)} placeholder="Escribe o pulsa el micro…" className="h-14 min-w-0 flex-1 rounded-full border-2 border-stone-200 bg-white px-5 text-[17px] outline-none focus:border-olivo-500" />
           <button type="submit" disabled={!texto.trim() || pensando} className="h-14 w-14 shrink-0 rounded-full bg-tierra-600 text-2xl text-white disabled:opacity-40" aria-label="Enviar">
             ➤
           </button>

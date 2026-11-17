@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { supabase, supabaseConfigurado } from "@/lib/supabase";
 import { detectarRecinto, posicionActual } from "@/lib/geo";
 import { guardarCache, leerCache, leerCola, sincronizar } from "@/lib/offline";
+import { listarBandeja, subirFotosPendientes } from "@/lib/bandeja";
 
 const Ctx = createContext(null);
 export const useApp = () => useContext(Ctx);
@@ -184,7 +185,10 @@ export default function AppProvider({ children }) {
     const on = async () => {
       setOnline(true);
       const n = await sincronizar();
-      if (n) notificar(`${n} registro(s) sincronizados`);
+      const fotos = await subirFotosPendientes();
+      const porRevisar = (await listarBandeja()).filter((x) => x.tipo !== "foto").length;
+      const partes = [n ? `${n} trabajo(s) enviados` : "", fotos ? `${fotos} foto(s) subidas` : "", porRevisar ? `${porRevisar} cosa(s) por revisar en Inicio` : ""].filter(Boolean);
+      if (partes.length) notificar("📥 " + partes.join(" · "));
       act();
     };
     const off = () => setOnline(false);
