@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { useApp } from "@/components/AppProvider";
 import { Boton, Campo, Etiqueta, Hoja, Input, Pagina, Select, Seccion, Tarjeta, Vacio, BotonEliminar } from "@/components/ui";
 import { euros, fechaCorta } from "@/lib/formato";
+import { HistorialEquipo } from "@/components/Mantenimiento";
 
 const TIPOS_DOC = [
   ["itv", "ITV"],
@@ -33,7 +34,7 @@ export default function Maquinaria() {
   async function cargar() {
     const [d, a] = await Promise.all([
       supabase.from("maquinaria_documentos").select("*").eq("empresa_id", empresaId).order("fecha_caducidad"),
-      supabase.from("averias").select("*").eq("empresa_id", empresaId).eq("estado", "abierta").order("fecha", { ascending: false }),
+      supabase.from("mantenimientos").select("id, maquinaria_id, apero_id, descripcion, fecha").eq("empresa_id", empresaId).eq("estado", "pendiente").order("fecha", { ascending: false }),
     ]);
     setDocs(d.data || []);
     setAverias(a.data || []);
@@ -72,10 +73,8 @@ export default function Maquinaria() {
             );
           })}
           {av.map((a) => (
-            <button key={a.id} type="button" disabled={!esGestor} onClick={() => setHoja({ tipo: "averia", item, de: tipo, registro: a })}>
-              <Etiqueta color="rojo">
-                🔧 {a.descripcion} {esGestor ? "✏️" : ""}
-              </Etiqueta>
+            <button key={a.id} type="button" onClick={() => setHoja({ tipo: "historial", item, de: tipo })}>
+              <Etiqueta color="rojo">🔴 {a.descripcion}</Etiqueta>
             </button>
           ))}
         </div>
@@ -85,8 +84,8 @@ export default function Maquinaria() {
               + Documento
             </button>
           )}
-          <button type="button" onClick={() => setHoja({ tipo: "averia", item, de: tipo })}>
-            + Avería
+          <button type="button" onClick={() => setHoja({ tipo: "historial", item, de: tipo })}>
+            🛠️ {esGestor ? "Mantenimiento e historial" : "Avisar de una avería"}
           </button>
         </div>
       </Tarjeta>
@@ -111,13 +110,13 @@ export default function Maquinaria() {
         </div>
       </Seccion>
 
-      <Hoja abierta={!!hoja} onCerrar={() => setHoja(null)} titulo={{ maquina: "Máquina", apero: "Apero", doc: "Documento", averia: "Avería" }[hoja?.tipo]}>
+      <Hoja abierta={!!hoja} onCerrar={() => setHoja(null)} titulo={hoja?.tipo === "historial" ? `🛠️ ${hoja.item.nombre}` : { maquina: "Máquina", apero: "Apero", doc: "Documento" }[hoja?.tipo]}>
         {hoja?.tipo === "maquina" || hoja?.tipo === "apero" ? (
           <FormEquipo tipo={hoja.tipo} item={hoja.item} empresaId={empresaId} onHecho={hecho} />
         ) : hoja?.tipo === "doc" ? (
           <FormDoc hoja={hoja} empresaId={empresaId} onHecho={hecho} />
-        ) : hoja?.tipo === "averia" ? (
-          <FormAveria hoja={hoja} empresaId={empresaId} onHecho={hecho} esGestor={esGestor} />
+        ) : hoja?.tipo === "historial" ? (
+          <HistorialEquipo key={hoja.item.id} equipo={hoja.item} de={hoja.de} onCambio={cargar} />
         ) : null}
       </Hoja>
     </Pagina>
@@ -179,7 +178,7 @@ function FormEquipo({ tipo, item, empresaId, onHecho }) {
           </Boton>
           <BotonEliminar
             texto={tipo === "maquina" ? "🗑️ Eliminar máquina" : "🗑️ Eliminar apero"}
-            pregunta="¿Eliminar este equipo? Se borran también sus documentos y averías. No se puede deshacer."
+            pregunta="¿Eliminar este equipo? Se borran también sus documentos y su historial de mantenimiento. No se puede deshacer."
             onEliminar={() => eliminarRegistro(tabla, item.id)}
             onBaja={() => supabase.from(tabla).update(tipo === "maquina" ? { activa: false } : { activo: false }).eq("id", item.id)}
             textoHecho="Equipo eliminado"
@@ -240,40 +239,3 @@ function FormDoc({ hoja, empresaId, onHecho }) {
   );
 }
 
-function FormAveria({ hoja, empresaId, onHecho, esGestor }) {
-  const r = hoja.registro;
-  const [desc, setDesc] = useState(r?.descripcion || "");
-  const [coste, setCoste] = useState(r?.coste != null ? String(r.coste) : "");
-  const [reparada, setReparada] = useState(r?.estado === "reparada");
-  async function guardar() {
-    const datos = { descripcion: desc, coste: coste ? Number(String(coste).replace(",", ".")) : null, estado: reparada ? "reparada" : "abierta" };
-    const { error } = r
-      ? await supabase.from("averias").update(datos).eq("id", r.id)
-      : await supabase.from("averias").insert({ ...datos, empresa_id: empresaId, [hoja.de === "maquina" ? "maquinaria_id" : "apero_id"]: hoja.item.id });
-    if (error) return alert(error.message);
-    onHecho(r ? (reparada ? "Avería marcada como reparada ✓" : "Avería actualizada ✓") : "Avería anotada ✓");
-  }
-  return (
-    <div className="space-y-3">
-      <p className="font-bold">{hoja.item.nombre}</p>
-      <Campo etiqueta="¿Qué le pasa?">
-        <Input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Pierde aceite el hidráulico" />
-      </Campo>
-      {esGestor && (
-        <Campo etiqueta="Coste (opcional)">
-          <Input inputMode="decimal" value={coste} onChange={(e) => setCoste(e.target.value)} />
-        </Campo>
-      )}
-      {r && (
-        <label className="flex items-center gap-2 text-[15px] font-semibold">
-          <input type="checkbox" className="h-5 w-5 accent-olivo-700" checked={reparada} onChange={(e) => setReparada(e.target.checked)} />
-          Ya está reparada
-        </label>
-      )}
-      <Boton grande className="w-full" disabled={!desc} onClick={guardar}>
-        Guardar
-      </Boton>
-      {r && <BotonEliminar texto="🗑️ Eliminar avería" onEliminar={() => eliminarRegistro("averias", r.id)} textoHecho="Avería eliminada" onHecho={onHecho} />}
-    </div>
-  );
-}

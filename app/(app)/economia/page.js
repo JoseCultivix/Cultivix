@@ -27,7 +27,7 @@ export default function Economia() {
     (async () => {
       const desde = elegidas.reduce((m, c) => (c.fecha_inicio < m ? c.fecha_inicio : m), "9999");
       const hasta = elegidas.reduce((m, c) => (c.fecha_fin > m ? c.fecha_fin : m), "0000");
-      const [l, a, e, rep, g] = await Promise.all([
+      const [l, a, e, rep, g, mo] = await Promise.all([
         // Cada recinto de cada parte, con su campaña de cultivo
         supabase
           .from("partes_trabajo_recintos")
@@ -51,6 +51,15 @@ export default function Economia() {
           .gte("albaranes_compra.fecha", desde)
           .lte("albaranes_compra.fecha", hasta)
           .not("categoria", "in", "(fitosanitario,herbicida,fertilizante,bioestimulante,semilla)"),
+        // Mano de obra propia en reparaciones y mantenimientos (horas × coste/hora del trabajador)
+        supabase
+          .from("mantenimientos")
+          .select("maquinaria_id, apero_id, horas_mano_obra, trabajadores(coste_hora)")
+          .eq("empresa_id", empresaId)
+          .eq("donde", "propios")
+          .not("horas_mano_obra", "is", null)
+          .gte("fecha", desde)
+          .lte("fecha", hasta),
       ]);
       const partesIds = [...new Set((l.data || []).map((x) => x.parte_trabajo_id))];
       // Superficie total de cada parte (todas sus parcelas, de cualquier cultivo) para repartir su coste
@@ -74,7 +83,7 @@ export default function Economia() {
           supTotal[x.parte_trabajo_id].n += 1;
         }
       }
-      setDatos({ lineas: l.data || [], albaranes: a.data || [], costes, supTotal, entregas: e.data || [], reparto: rep.data || [], gastos: g.data || [], equipos });
+      setDatos({ lineas: l.data || [], albaranes: a.data || [], costes, supTotal, entregas: e.data || [], reparto: rep.data || [], gastos: g.data || [], equipos, manoObraTaller: mo.data || [] });
     })();
   }, [empresaId, ids.join(","), recarga]); // eslint-disable-line
 
@@ -126,6 +135,13 @@ export default function Economia() {
       }
       for (const k of ["maquinas", "aperos"]) for (const [id, e] of Object.entries(rp[k])) gastoEquipo[k][id] = (gastoEquipo[k][id] || 0) + e;
       general += rp.general;
+    }
+    for (const m of datos.manoObraTaller || []) {
+      const e = (+m.horas_mano_obra || 0) * (+m.trabajadores?.coste_hora || 0);
+      if (!e) continue;
+      const k = m.maquinaria_id ? "maquinas" : "aperos";
+      const id = m.maquinaria_id || m.apero_id;
+      gastoEquipo[k][id] = (gastoEquipo[k][id] || 0) + e;
     }
     const equiposTabla = [];
     for (const k of ["maquinas", "aperos"]) {
@@ -240,7 +256,7 @@ export default function Economia() {
                     </div>
                   ))}
               </Tarjeta>
-              <p className="mt-2 text-xs text-stone-500">Gasoil, repuestos y reparaciones imputados a cada equipo. Se suman al coste/hora que tengas puesto en la ficha de la máquina: deja en ese coste/hora solo la amortización y el seguro.</p>
+              <p className="mt-2 text-xs text-stone-500">Gasoil, repuestos, reparaciones y horas de mantenimiento con medios propios de cada equipo. Se suman al coste/hora que tengas puesto en la ficha de la máquina: deja en ese coste/hora solo la amortización y el seguro.</p>
             </Seccion>
           )}
 

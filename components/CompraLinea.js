@@ -20,7 +20,9 @@ export function imputacionValida(imps) {
  * - De almacén (fitosanitarios, abonos, semillas…): producto, lote, cantidad. Su coste llega a la parcela al aplicarlo.
  * - Gastos directos (gasoil, reparaciones, materiales, servicios…): concepto, importe y a qué se imputa.
  */
-export default function CompraLinea({ l, onCambio, onQuitar, productos = [] }) {
+export default function CompraLinea({ l, onCambio, onQuitar, productos = [], mantenimientos = [] }) {
+  const { maquinaria, aperos } = useApp();
+  const nombreEquipo = (m) => (m.maquinaria_id ? maquinaria.find((x) => x.id === m.maquinaria_id)?.nombre : aperos.find((x) => x.id === m.apero_id)?.nombre) || "Equipo";
   const cat = categoria(l.categoria);
   const almacen = esAlmacen(l.categoria);
   const set = (k, v) => {
@@ -108,7 +110,30 @@ export default function CompraLinea({ l, onCambio, onQuitar, productos = [] }) {
               <Input inputMode="decimal" value={l.importe ?? ""} onChange={(e) => onCambio({ importe: e.target.value })} />
             </Campo>
           </div>
-          <Imputacion valor={l.imputaciones || []} onCambio={(v) => onCambio({ imputaciones: v })} destino={cat.destino} />
+          {mantenimientos.length > 0 && ["gasoil", "repuesto", "reparacion", "material", "servicio", "otro"].includes(l.categoria) && (
+            <Campo etiqueta="¿Es de una reparación o mantenimiento? (opcional)">
+              <select
+                className={claseInput}
+                value={l.mantenimiento_id || ""}
+                onChange={(e) => {
+                  const m = mantenimientos.find((x) => x.id === e.target.value);
+                  const patch = { mantenimiento_id: e.target.value || null };
+                  // Si se enlaza a una reparación, el gasto va a esa máquina o apero
+                  if (m) patch.imputaciones = [{ tipo: m.maquinaria_id ? "maquinaria" : "apero", id: m.maquinaria_id || m.apero_id, porcentaje: "" }];
+                  onCambio(patch);
+                }}
+              >
+                <option value="">No</option>
+                {mantenimientos.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {nombreEquipo(m)} · {m.descripcion || m.tipo} · {m.fecha?.split("-").reverse().slice(0, 2).join("/")}
+                    {m.estado === "pendiente" ? " (sin reparar)" : ""}
+                  </option>
+                ))}
+              </select>
+            </Campo>
+          )}
+          <Imputacion key={l.mantenimiento_id || "libre"} valor={l.imputaciones || []} onCambio={(v) => onCambio({ imputaciones: v })} destino={cat.destino} />
         </div>
       )}
     </Tarjeta>

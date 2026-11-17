@@ -21,6 +21,7 @@ export default function FormCompra({ compraId, inicial, documentoId, onHecho, te
   const { empresaId, productos, notificar } = useApp();
   const [doc, setDoc] = useState(inicial || (compraId ? null : { tipo_documento: "albaran", fecha: new Date().toISOString().slice(0, 10), con_factura: true, lineas: [lineaVacia()] }));
   const [proveedores, setProveedores] = useState([]);
+  const [mantenimientos, setMantenimientos] = useState([]);
   const [guardando, setGuardando] = useState(false);
 
   useEffect(() => {
@@ -30,6 +31,18 @@ export default function FormCompra({ compraId, inicial, documentoId, onHecho, te
       .eq("empresa_id", empresaId)
       .order("nombre")
       .then(({ data }) => setProveedores(data || []));
+  }, [empresaId]);
+
+  useEffect(() => {
+    const desde = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+    supabase
+      .from("mantenimientos")
+      .select("id, fecha, tipo, descripcion, maquinaria_id, apero_id, estado")
+      .eq("empresa_id", empresaId)
+      .gte("fecha", desde)
+      .order("fecha", { ascending: false })
+      .limit(100)
+      .then(({ data }) => setMantenimientos(data || []));
   }, [empresaId]);
 
   useEffect(() => {
@@ -85,6 +98,7 @@ export default function FormCompra({ compraId, inicial, documentoId, onHecho, te
           importe: n(l.importe),
           lote: l.lote || null,
           imputaciones: esAlmacen(l.categoria) ? [] : (l.imputaciones || []).map((i) => ({ tipo: i.tipo, id: i.id, porcentaje: n(i.porcentaje) })),
+          mantenimiento_id: esAlmacen(l.categoria) ? null : l.mantenimiento_id || null,
         })),
       };
       const { error } = await supabase.rpc("guardar_compra", { payload });
@@ -144,6 +158,7 @@ export default function FormCompra({ compraId, inicial, documentoId, onHecho, te
           key={l.clave || l.id || i}
           l={l}
           productos={productos}
+          mantenimientos={mantenimientos}
           onCambio={(patch) => setLinea(i, patch)}
           onQuitar={() => (l.descripcion_original ? setLinea(i, { ignorar: !l.ignorar }) : setDoc((d) => ({ ...d, lineas: d.lineas.filter((_, j) => j !== i) })))}
         />
